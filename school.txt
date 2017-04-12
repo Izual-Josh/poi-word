@@ -1,0 +1,4245 @@
+package com.hanboard.examwork.controller;
+
+import com.hanboard.examwork.model.ExamTag;
+import com.hanboard.examwork.model.ExamWork;
+import com.hanboard.examwork.service.ExamWorkService;
+import com.hanboard.platform.common.util.FileUtil;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.utils.JsonUtil;
+import com.wksc.commons.utils.os.PathUtils;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import java.io.File;
+import java.io.IOException;
+
+/**
+ * Created by gaoxiaobo on 2017/1/16
+ */
+@RestController
+@RequestMapping("/examWork")
+@Api(description = "考务管理")
+public class ExamWorkController {
+
+    private static final Logger logger = LoggerFactory.getLogger(ExamWorkController.class);
+    @Autowired
+    ExamWorkService service;
+
+    @ApiOperation(value = "考务分页查询", notes = "查询条件：{filter:examWorkName=abc,order:publishTime=desc}", response = SimpleMessage.class)
+    @RequestMapping(value = "/list", method = RequestMethod.GET)
+    public SimpleMessage query(PagerQuery pagerQuery) {
+        Pager pager = service.query(pagerQuery);
+        pager.setDraw(pagerQuery.getDraw());
+        logger.info("pager:{}", JsonUtil.toJSON(pager));
+        return SimpleMessage.info(pager);
+    }
+
+    @ApiOperation(value = "添加考务", notes = "step1:名称+修改时间(后台)+创建者(后台)，生成一条考务", response = ExamWork.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestBody ExamWork examWork) {
+
+        return service.insert(examWork);
+    }
+
+    /**
+     * 下载模板
+     *
+     * @param templateName 模板名
+     */
+    @ApiOperation(value = "下载模板", response = SimpleMessage.class)
+    @RequestMapping(value = "download/{templateName}", method = RequestMethod.GET)
+    public void downloadTemplate(HttpServletRequest request, HttpServletResponse response,
+                                 @ApiParam(value = "模板名", required = true) @PathVariable String templateName)
+            throws IOException {
+        String path = PathUtils.join(this.getClass().getResource("/").getPath(), "templates", templateName+".xlsx");
+        path = java.net.URLDecoder.decode(path,"utf-8");
+        File file = new File(path);
+        FileUtil.download(request, response, file);
+    }
+
+    @ApiOperation(value = "导入考生", notes = "step2", response = ExamWork.class)
+    @RequestMapping(value = "/examStudent", method = RequestMethod.POST)
+    public SimpleMessage uploadExamStudent(@RequestParam String examWorkId, @RequestParam MultipartFile files) {
+        return service.uploadExamStudent(examWorkId, files);
+    }
+
+    @ApiOperation(value = "删除考务", notes = "连带删除相关考场考生信息，发布后不可删除")
+    @RequestMapping(value = "/{id}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String id) {
+        return service.delete(id);
+    }
+
+    @ApiOperation(value = "取得考务详情", notes = "step1信息")
+    @RequestMapping(value = "/{id}", method = RequestMethod.GET)
+    public SimpleMessage getExamWorkById(@PathVariable String id) {
+        return service.getExamWorkById(id);
+    }
+
+    @ApiOperation(value = "修改考务", notes = "前端:名称,后端:修改时间", response = ExamWork.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.PUT)
+    public SimpleMessage update(@RequestBody ExamWork examWork) {
+        return service.update(examWork);
+    }
+
+    @ApiOperation(value = "分考场", notes = "step3：考场人数+考号前缀，生成考场+考签", response = ExamWork.class)
+    @RequestMapping(value = "/examRoom", method = RequestMethod.POST)
+    public SimpleMessage addExamRoom(@RequestParam String examWorkId, @RequestParam String examCodePrefix,
+                                     @RequestParam String examRoomStudentNumber) {
+        return service.addExamRoom(examWorkId,examCodePrefix,examRoomStudentNumber);
+    }
+
+    @ApiOperation(value = "取得考生列表", notes = "导入后展示考生信息")
+    @RequestMapping(value = "/examStudent/{id}", method = RequestMethod.GET)
+    public SimpleMessage getExamStudent(@PathVariable String id) {
+        return service.getExamStudent(id);
+    }
+
+    @ApiOperation(value = "取得考场列表", notes = "生成考场后显示考场信息")
+    @RequestMapping(value = "/examRoom/{id}", method = RequestMethod.GET)
+    public SimpleMessage getExamRoom(@PathVariable String id) {
+        return service.getExamRoom(id);
+    }
+
+    @ApiOperation(value = "取得考签列表", notes = "step4：展示考签信息", response = ExamTag.class)
+    @RequestMapping(value = "/examTag/{id}", method = RequestMethod.GET)
+
+    public SimpleMessage getExamTag(@PathVariable String id) {
+        return service.getExamTag(id);
+    }
+
+    @ApiOperation(value = "取得班级对照表", notes = "贴在班内，按考场号排序", response = ExamTag.class)
+    @RequestMapping(value = "/reportClass/{id}", method = RequestMethod.GET)
+    public SimpleMessage getReportClass(@PathVariable String id) {
+        return service.getReport(id,"class");
+    }
+
+    @ApiOperation(value = "取得考室对照表", notes = "贴在考室门", response = ExamTag.class)
+    @RequestMapping(value = "/reportRoom/{id}", method = RequestMethod.GET)
+    public SimpleMessage getReportRoom(@PathVariable String id) {
+        return service.getReport(id,"room");
+    }
+
+    @ApiOperation(value = "取得考室对照表", notes = "贴在考室门", response = ExamTag.class)
+    @RequestMapping(value = "/reportTag/{id}", method = RequestMethod.GET)
+    public SimpleMessage getReportTag(@PathVariable String id) {
+        return service.getReport(id,"tag");
+    }
+
+
+
+}
+package com.hanboard.examwork.dao;
+
+import com.hanboard.examwork.model.*;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/1/17.
+ */
+public interface ExamWorkDao {
+
+    List<ExamWork> query(Map map);
+    void insert(ExamWork examWork);
+
+    void update(ExamWork examWork);
+
+    void delete(@Param("id") String id);
+
+    ExamWork getExamWorkById(@Param("id") String id);
+
+    void deleteExamStudent(@Param("examWorkId") String examWorkId);
+
+    void insertExamStudent(@Param("examWorkId") String examWorkId,
+                           @Param("studentList") List<ExcelExamStudent> studentList);
+
+    void deleteExamRoom(@Param("examWorkId") String examWorkId);
+
+    void insertExamRoom(@Param("examRoomList") List<ExamRoom> examRoomList);
+
+    void insertExamTag(@Param("examTagList") List<ExamTag> examTagList);
+
+    List<ExcelExamStudent> getExamStudent(@Param("examWorkId") String examWorkId);
+
+    List<ExamRoom> getExamRoom(@Param("examWorkId") String examWorkId);
+
+    List<ExamTag> getExamTag(@Param("examWorkId") String examWorkId);
+    List<ReportClassVo> getReportClass(@Param("examWorkId") String examWorkId);
+}
+package com.hanboard.examwork.model;
+
+/**
+ * Created by gaoxiaobo on 2017/1/16.
+ */
+public class ExamRoom {
+    private String id;
+    private String examWorkId;
+    private String examRoomCode;
+    //每个考场的考生人数，最后一个考场可能会少
+    private Integer studentNumber;
+
+    public String getExamWorkId() {
+        return examWorkId;
+    }
+
+    public void setExamWorkId(String examWorkId) {
+        this.examWorkId = examWorkId;
+    }
+
+    public String getExamRoomCode() {
+        return examRoomCode;
+    }
+
+    public void setExamRoomCode(String examRoomCode) {
+        this.examRoomCode = examRoomCode;
+    }
+
+    public Integer getStudentNumber() {
+        return studentNumber;
+    }
+
+    public void setStudentNumber(Integer studentNumber) {
+        this.studentNumber = studentNumber;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public ExamRoom() {
+    }
+
+    public ExamRoom(String id, String examWorkId, String examRoomCode, Integer studentNumber) {
+        this.id = id;
+        this.examWorkId = examWorkId;
+        this.examRoomCode = examRoomCode;
+        this.studentNumber = studentNumber;
+    }
+
+    @Override
+    public String toString() {
+        return "ExamRoom{" +
+                "id='" + id + '\'' +
+                ", examWorkId='" + examWorkId + '\'' +
+                ", examRoomCode='" + examRoomCode + '\'' +
+                ", studentNumber=" + studentNumber +
+                '}';
+    }
+}
+package com.hanboard.examwork.model;
+
+/**
+ * Created by gaoxiaobo on 2017/1/16.
+ */
+public class ExamTag {
+    private String id;
+    private String examWorkId;
+    private String examWorkName;
+
+    private String examRoomId;
+    private String examRoomCode;
+
+    private String examStudentId;
+    private String examStudentName;
+
+    private String classCode;
+    private String examCode;
+    private String seatCode;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getExamWorkId() {
+        return examWorkId;
+    }
+
+    public void setExamWorkId(String examWorkId) {
+        this.examWorkId = examWorkId;
+    }
+
+    public String getExamRoomId() {
+        return examRoomId;
+    }
+
+    public void setExamRoomId(String examRoomId) {
+        this.examRoomId = examRoomId;
+    }
+
+    public String getExamStudentId() {
+        return examStudentId;
+    }
+
+    public void setExamStudentId(String examStudentId) {
+        this.examStudentId = examStudentId;
+    }
+
+    public String getExamCode() {
+        return examCode;
+    }
+
+    public void setExamCode(String examCode) {
+        this.examCode = examCode;
+    }
+
+    public String getSeatCode() {
+        return seatCode;
+    }
+
+    public void setSeatCode(String seatCode) {
+        this.seatCode = seatCode;
+    }
+
+    public String getExamWorkName() {
+        return examWorkName;
+    }
+
+    public void setExamWorkName(String examWorkName) {
+        this.examWorkName = examWorkName;
+    }
+
+    public String getExamRoomCode() {
+        return examRoomCode;
+    }
+
+    public void setExamRoomCode(String examRoomCode) {
+        this.examRoomCode = examRoomCode;
+    }
+
+    public String getExamStudentName() {
+        return examStudentName;
+    }
+
+    public void setExamStudentName(String examStudentName) {
+        this.examStudentName = examStudentName;
+    }
+
+    public String getClassCode() {
+        return classCode;
+    }
+
+    public void setClassCode(String classCode) {
+        this.classCode = classCode;
+    }
+
+    public ExamTag() {
+
+    }
+
+    public ExamTag(String id, String examWorkId, String examRoomId, String examStudentId, String examCode, String seatCode) {
+        this.id = id;
+        this.examWorkId = examWorkId;
+        this.examRoomId = examRoomId;
+        this.examStudentId = examStudentId;
+        this.examCode = examCode;
+        this.seatCode = seatCode;
+    }
+
+    @Override
+    public String toString() {
+        return "ExamTag{" +
+                "id='" + id + '\'' +
+                ", examWorkId='" + examWorkId + '\'' +
+                ", examRoomId='" + examRoomId + '\'' +
+                ", examStudentId='" + examStudentId + '\'' +
+                ", examCode='" + examCode + '\'' +
+                ", seatCode='" + seatCode + '\'' +
+                '}';
+    }
+}
+package com.hanboard.examwork.model;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+import org.hibernate.validator.constraints.Length;
+import org.hibernate.validator.constraints.NotBlank;
+
+import javax.validation.groups.Default;
+import java.util.Date;
+
+/**
+ * Created by gaoxiaobo on 2017/1/16.
+ */
+public class ExamWork {
+    private String id;
+    @Length(max = 100, message = "考务名称长度不能超过100位！")
+    @NotBlank(message = "考务名称不能为空！")
+    private String examWorkName;
+
+    //考号前缀 比如3[年级] 2013[入学时间] 001 [第1次] 最后可以合成 考号=prefix + room_code + exam_order
+
+    private String examCodePrefix;
+    private String creater;
+
+    //考试时间
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss",timezone = "GMT+8")
+    private Date examTime;
+
+    //发布时间,平时为修改时间，发布后不变
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss",timezone = "GMT+8")
+    private Date publishTime;
+    //第几步，发布后不能修改的标志
+    private Integer status;
+    private String statusName;
+
+    String schoolId;
+
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getExamWorkName() {
+        return examWorkName;
+    }
+
+    public void setExamWorkName(String examWorkName) {
+        this.examWorkName = examWorkName;
+    }
+
+    public String getExamCodePrefix() {
+        return examCodePrefix;
+    }
+
+    public void setExamCodePrefix(String examCodePrefix) {
+        this.examCodePrefix = examCodePrefix;
+    }
+
+    public String getCreater() {
+        return creater;
+    }
+
+    public void setCreater(String creater) {
+        this.creater = creater;
+    }
+
+    public Date getExamTime() {
+        return examTime;
+    }
+
+    public void setExamTime(Date examTime) {
+        this.examTime = examTime;
+    }
+
+    public Date getPublishTime() {
+        return publishTime;
+    }
+
+    public void setPublishTime(Date publishTime) {
+        this.publishTime = publishTime;
+    }
+
+    public Integer getStatus() {
+        return status;
+    }
+
+    public void setStatus(Integer status) {
+        this.status = status;
+    }
+
+    public String getStatusName() {
+        if(this.status == 1){
+            this.statusName = "已添加考务";
+        }else if(this.status == 2){
+            this.statusName = "已导入考生";
+        }else if(this.status == 3){
+            this.statusName = "已分考室";
+        }else {
+            this.statusName = "已添加考务";
+        }
+        return statusName;
+    }
+
+    public String getSchoolId() {
+        return schoolId;
+    }
+
+    public void setSchoolId(String schoolId) {
+        this.schoolId = schoolId;
+    }
+}
+package com.hanboard.examwork.model;
+
+import com.gohighedu.excel.annotation.Excel;
+import com.gohighedu.excel.annotation.ImportField;
+import com.hanboard.platform.framework.utils.UUIDUtil;
+import org.springframework.util.IdGenerator;
+
+import javax.rmi.CORBA.Util;
+
+/**
+ * 学生导入excel pojo
+ *
+ * @author gxb 2017-01-18
+ */
+@Excel
+public class ExcelExamStudent {
+
+    //uuid
+    private String id;
+    @ImportField(colName = "序号",dataConvert = StringConvert.class)
+    private String examOrder;
+
+    @ImportField(colName = "班号",dataConvert = StringConvert.class)
+    private String classCode;
+
+    @ImportField(colName = "姓名")
+    private String studentName;
+
+    //导入失败原因
+    private String failedReason;
+
+    public String getId() {
+        if(null == id){
+            return UUIDUtil.getUUID();
+        }else {
+            return id;
+        }
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getExamOrder() {
+        return examOrder;
+    }
+
+    public void setExamOrder(String examOrder) {
+        this.examOrder = examOrder;
+    }
+
+    public String getClassCode() {
+        return classCode;
+    }
+
+    public void setClassCode(String classCode) {
+        this.classCode = classCode;
+    }
+
+    public String getStudentName() {
+        return studentName;
+    }
+
+    public void setStudentName(String studentName) {
+        this.studentName = studentName;
+    }
+
+    public String getFailedReason() {
+        return failedReason;
+    }
+
+    public void setFailedReason(String failedReason) {
+        this.failedReason = failedReason;
+    }
+}
+package com.hanboard.examwork.model;
+
+/**
+ * Created by gaoxiaobo on 2017/1/16.
+ */
+public class ReportClassVo {
+
+    private String examWorkName;
+    private String classCode;
+    private String examStudentName;
+
+    private String examRoomCode;
+    private String seatCode;
+    private String examCode;
+
+    public String getExamWorkName() {
+        return examWorkName;
+    }
+
+    public void setExamWorkName(String examWorkName) {
+        this.examWorkName = examWorkName;
+    }
+
+    public String getClassCode() {
+        return classCode;
+    }
+
+    public void setClassCode(String classCode) {
+        this.classCode = classCode;
+    }
+
+    public String getExamStudentName() {
+        return examStudentName;
+    }
+
+    public void setExamStudentName(String examStudentName) {
+        this.examStudentName = examStudentName;
+    }
+
+    public String getExamRoomCode() {
+        return examRoomCode;
+    }
+
+    public void setExamRoomCode(String examRoomCode) {
+        this.examRoomCode = examRoomCode;
+    }
+
+    public String getSeatCode() {
+        return seatCode;
+    }
+
+    public void setSeatCode(String seatCode) {
+        this.seatCode = seatCode;
+    }
+
+    public String getExamCode() {
+        return examCode;
+    }
+
+    public void setExamCode(String examCode) {
+        this.examCode = examCode;
+    }
+
+    public ReportClassVo() {
+
+    }
+
+    @Override
+    public String toString() {
+        return "ReportClassVo{" +
+                "examWorkName='" + examWorkName + '\'' +
+                ", classCode='" + classCode + '\'' +
+                ", examStudentName='" + examStudentName + '\'' +
+                ", examRoomCode='" + examRoomCode + '\'' +
+                ", seatCode='" + seatCode + '\'' +
+                ", examCode='" + examCode + '\'' +
+                '}';
+    }
+}
+package com.hanboard.examwork.model;
+
+import com.gohighedu.excel.core.ColumnDataConvert;
+
+/**
+ * Created by gxb on 2016-6-3.
+ */
+public class StringConvert implements ColumnDataConvert {
+    @Override
+    public Object importConvert(Object columnData) {
+        return columnData.toString();
+    }
+
+    @Override
+    public Object exportConvert(Object data) {
+        return null;
+    }
+}
+package com.hanboard.examwork.service;
+
+import com.github.orderbyhelper.OrderByHelper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.gohighedu.excel.core.ImportManage;
+import com.gohighedu.excel.exception.ImportExcelException;
+import com.gohighedu.excel.module.ImportData;
+import com.gohighedu.excel.module.ImportResult;
+import com.google.common.collect.Lists;
+import com.hanboard.examwork.dao.ExamWorkDao;
+import com.hanboard.examwork.model.*;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.data.page.ParameterUtil;
+import com.hanboard.platform.framework.security.usermodule.SimpleUser;
+import com.hanboard.platform.framework.security.util.UserUtil;
+import com.hanboard.platform.framework.utils.UUIDUtil;
+import com.hanboard.school.basic.commons.dao.BasicDao;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.hibernate.validator.constraints.Length;
+import org.hibernate.validator.constraints.NotBlank;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.multipart.MultipartFile;
+
+import javax.validation.Valid;
+import javax.validation.constraints.Pattern;
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
+
+/**
+ * Created by gaoxiaobo on 2017/1/17.
+ */
+@Service
+@Validated()
+@Transactional
+public class ExamWorkService {
+
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ExamWorkService.class);
+
+    @Autowired
+    ExamWorkDao dao;
+    @Autowired
+    BasicDao basicDao;
+
+    public Pager query(PagerQuery pagerQuery) {
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+
+        String userId = UserUtil.getUser().getId();
+        List<String> schoolId = basicDao.getSchoolIdsByAuthority(userId);
+        map.put("schoolId",schoolId);
+
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (StringUtils.isNotEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+
+
+        List<ExamWork> list = dao.query(map);
+        PageInfo pageInfo = new PageInfo(list);
+        Pager pager = new Pager<ExamWork>(pageInfo.getTotal(), pageInfo.getList());
+        return pager;
+    }
+
+    public SimpleMessage insert(@Valid ExamWork examWork) {
+        String schoolId = UserUtil.getUser().getSchoolId();
+        examWork.setPublishTime(new Date());
+        examWork.setStatus(1);
+        examWork.setSchoolId(schoolId);
+        dao.insert(examWork);
+        return SimpleMessage.info("添加考务成功");
+    }
+
+    public SimpleMessage update(ExamWork examWork) {
+        examWork.setPublishTime(new Date());
+        dao.update(examWork);
+        return SimpleMessage.info("修改考务成功");
+    }
+
+    public SimpleMessage delete(String id) {
+        dao.delete(id);
+        return SimpleMessage.info("删除考务成功");
+    }
+
+    public SimpleMessage getExamWorkById(String id) {
+        ExamWork examWork = dao.getExamWorkById(id);
+        return SimpleMessage.info(examWork);
+    }
+
+    public SimpleMessage uploadExamStudent(String examWorkId, MultipartFile files) {
+        try {
+            File convFile = new File(files.getOriginalFilename());
+            files.transferTo(convFile);
+
+
+            ImportManage importManage = new ImportManage(ExcelExamStudent.class, convFile);
+            ImportResult<ExcelExamStudent> result = importManage.executeImport();
+            if (CollectionUtils.isEmpty(result.getImportFailDatas()) &&
+                    CollectionUtils.isEmpty(result.getImportSucDatas())) {
+                return SimpleMessage.warn("导入数据为空");
+            }
+
+            List<ImportData<ExcelExamStudent>> failDatas = result.getImportFailDatas();
+            List<ExcelExamStudent> studentList = new ArrayList<>();
+            for (ImportData<ExcelExamStudent> data : result.getImportSucDatas()) {
+                studentList.add(data.getData());
+            }
+            //更新状态为第2步
+            ExamWork examWork = new ExamWork();
+            examWork.setId(examWorkId);
+            examWork.setStatus(2);
+            dao.update(examWork);
+
+            //先删除再插入
+            dao.deleteExamStudent(examWorkId);
+            dao.insertExamStudent(examWorkId, studentList);
+        } catch (ImportExcelException e) {
+            return SimpleMessage.warn("Excel 格式不对,请核对后再导入");
+        } catch (IOException e) {
+            LOGGER.error("IOException {}", e);
+        } catch (Error e) {
+            LOGGER.error("Error {}", e);
+        }
+        return SimpleMessage.info("导入成功");
+    }
+
+
+    public SimpleMessage addExamRoom(String examWorkId,
+                                     @Length(max = 100, message = "考号前缀长度不能超过100位！")
+                                     @NotBlank(message = "考号前缀不能为空！")
+                                     String examCodePrefix,
+                                     @Pattern(regexp = "^\\d*[1-9]\\d*$", message = "考场人数只能是正整数！")
+                                     String examRoomStudentNumber) {
+        //查到学生列表后按人数分考场
+        List<ExcelExamStudent> bigList = dao.getExamStudent(examWorkId);
+        List<List<ExcelExamStudent>> smallerLists = Lists.partition(bigList, Integer.valueOf(examRoomStudentNumber));
+
+        //考场编号
+        int index = 1;
+
+        String examRoomCode = "";
+        String examCode = "";
+        String seatCode = "";
+        List<ExamRoom> roomList = new ArrayList<>();
+        List<ExamTag> tagList = new ArrayList<>();
+        for (List<ExcelExamStudent> examRoomStudent : smallerLists) {
+            //第1层生成2位考场号
+            examRoomCode = String.format("%02d", index++);
+            String examRoomId = UUIDUtil.getUUID();
+            roomList.add(new ExamRoom(examRoomId, examWorkId, examRoomCode, examRoomStudent.size()));
+
+            //座位编号,每个考场都从1开始
+            int indexSeatCode = 1;
+            for (ExcelExamStudent stu : examRoomStudent) {
+                //生成2位座位号
+                seatCode = String.format("%02d", indexSeatCode++);
+                examCode = examCodePrefix + examRoomCode + String.format("%04d", Integer.valueOf(stu.getExamOrder()));
+                tagList.add(new ExamTag(UUIDUtil.getUUID(), examWorkId, examRoomId,
+                        stu.getId(), examCode, seatCode));
+            }
+        }
+        //更新考号前缀供加载时使用，更新状态可以点击查看报表
+        ExamWork examWork = new ExamWork();
+        examWork.setId(examWorkId);
+        examWork.setExamCodePrefix(examCodePrefix);
+        examWork.setStatus(3);
+        dao.update(examWork);
+
+        //先删除再增加
+        dao.deleteExamRoom(examWorkId);
+        dao.insertExamRoom(roomList);
+        dao.insertExamTag(tagList);
+        return SimpleMessage.info("生成考签成功");
+    }
+
+    public SimpleMessage getExamStudent(String id) {
+        List<ExcelExamStudent> studentList = dao.getExamStudent(id);
+        return SimpleMessage.info(studentList);
+    }
+
+    public SimpleMessage getExamRoom(String id) {
+        List<ExamRoom> roomList = dao.getExamRoom(id);
+        return SimpleMessage.info(roomList);
+    }
+
+    public SimpleMessage getExamTag(String id) {
+        List<ExamTag> tagList = dao.getExamTag(id);
+        return SimpleMessage.info(tagList);
+    }
+
+    /**
+     * 按班级/考场分组
+     * @param id
+     * @return
+     */
+    public SimpleMessage getReportClass(String id) {
+        List<ReportClassVo> classList = dao.getReportClass(id);
+        Map<String,List<ReportClassVo>> group = new HashMap<>();
+        for(ReportClassVo vo:classList){
+            String key = vo.getExamWorkName()+","+vo.getClassCode();
+            if (!group.containsKey(key)) {
+                group.put(key, Lists.<ReportClassVo>newArrayList());
+            }
+            group.get(key).add(vo);
+
+        }
+        return SimpleMessage.info(group);
+    }
+
+    /**
+     * 按班级/考场分组
+     * @param id
+     * @return
+     */
+    public SimpleMessage getReport(String id,String type) {
+        List<ExamTag> classList = dao.getExamTag(id);
+        Map<String,List<ExamTag>> group = new TreeMap<>();
+        for(ExamTag vo:classList){
+            String key = "";
+            if(type.equals("class")){
+                key = vo.getExamWorkName()+","+vo.getClassCode();
+            }else{
+                key = vo.getExamWorkName()+","+vo.getExamRoomCode();
+            }
+
+            if (!group.containsKey(key)) {
+                group.put(key, Lists.<ExamTag>newArrayList());
+            }
+            group.get(key).add(vo);
+
+        }
+        return SimpleMessage.info(group);
+    }
+
+}
+package com.hanboard.monitor.controller;
+
+import com.hanboard.monitor.rpcServiceImpl.MonitorServiceImpl;
+import com.hanboard.school.monitor.model.Camera;
+import com.hanboard.monitor.service.CameraService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.school.monitor.model.CameraPlayParam;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@RestController
+@RequestMapping("/monitor/camera")
+@Api(description = "摄像头管理")
+public class CameraController {
+
+    @Autowired
+    CameraService service;
+//    @Autowired
+//    MonitorServiceImpl monitorService;
+
+    @ApiOperation(value = "摄像头查询", notes = "查询条件不加引号：{filter:enterType=0|1;studentName=xxx;" +
+            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+            "order:enterTime=desc}", response = PagerQuery.class)
+    @RequestMapping(value = "", method = RequestMethod.GET)
+    public SimpleMessage query(PagerQuery pagerQuery) {
+        Pager pager = service.query(pagerQuery);
+        return SimpleMessage.info(pager);
+    }
+
+    @ApiOperation(value = "添加摄像头", notes = "学校id，学校名称应从rpc获取", response = Camera.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestBody Camera form) {
+        return service.insert(form);
+    }
+
+    @ApiOperation(value = "删除摄像头", notes = "级连删除中间表中对应记录", response = SimpleMessage.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String id) {
+        return service.delete(id);
+    }
+
+    @ApiOperation(value = "取得录相机下未分配摄像头", notes = "用来级联查询", response = SimpleMessage.class)
+    @RequestMapping(value = "/getCameraByRecorder/{recorderId}", method = RequestMethod.GET)
+    public SimpleMessage getCameraByRecorder(@PathVariable String recorderId) {
+        return service.getCameraByRecorder(recorderId);
+    }
+
+    @ApiOperation(value = "取得摄像头播放参数", notes = "用来播放", response = SimpleMessage.class)
+    @RequestMapping(value = "/getPlayParam/{id}", method = RequestMethod.GET)
+    public SimpleMessage getPlayParam(@PathVariable String id) {
+        return service.getPlayParam(id);
+    }
+
+    @ApiOperation(value = "取得详情", notes = "修改时初始化", response = Camera.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.GET)
+    public SimpleMessage getById(@PathVariable String id) {
+        return service.getById(id);
+    }
+
+    @ApiOperation(value = "修改摄像头", notes = "修改", response = Camera.class)
+    @RequestMapping(value = "", method = RequestMethod.PUT)
+    public SimpleMessage update(@RequestBody Camera form) {
+        return service.update(form);
+    }
+
+//    @ApiOperation(value = "rpc接口", notes = "对外提供摄像头信息，需要学校id和班级编号列表 classCode=a,b,c", response = Camera.class)
+//    @RequestMapping(value = "/rpc/{schoolId}", method = RequestMethod.GET)
+//    public SimpleMessage getByRpc(@PathVariable String schoolId,@RequestParam String[] classCode) {
+//        return SimpleMessage.info(monitorService.getByRpc(schoolId,classCode));
+//    }
+
+    @ApiOperation(value = "主页根据用户取得全部摄像头", notes = "查询all", response = Camera.class)
+    @RequestMapping(value = "/getAllCameraByHome", method = RequestMethod.GET)
+    public SimpleMessage getAllByHome() {
+        return service.getAllByHome();
+    }
+
+    @ApiOperation(value = "主页根据用户取得一个摄像头", notes = "查询one", response = Camera.class)
+    @RequestMapping(value = "/getOneCameraByHome", method = RequestMethod.GET)
+    public SimpleMessage getOneByHome() {
+        return service.getOneByHome();
+    }
+
+
+    @ApiOperation(value = "主页修改摄像头", notes = "修改摄像头", response = Camera.class)
+    @RequestMapping(value = "/updateUserCamera", method = RequestMethod.PUT)
+    public SimpleMessage update(@RequestParam String cameraId) {
+        return service.updateUserCamera(cameraId);
+    }
+}
+package com.hanboard.monitor.controller;
+
+import com.hanboard.monitor.service.ClassroomService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.school.monitor.model.Classroom;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@RestController
+@RequestMapping("/monitor/classroom/camera")
+@Api(description = "教室摄像头管理")
+public class ClassroomController {
+
+    @Autowired
+    ClassroomService service;
+
+    @ApiOperation(value = "教室摄像头展示", notes = "查询条件  就是当前学段 id", response = Classroom.class)
+    @RequestMapping(value = "/{stageId}", method = RequestMethod.GET)
+    public SimpleMessage query(@PathVariable String stageId) {
+        return service.query(stageId);
+    }
+
+    @ApiOperation(value = "配置摄像头", notes = "操作关系表", response = Classroom.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestParam  String cameraId,@RequestParam String classroomId ) {
+        return service.insert(cameraId,classroomId);
+    }
+
+    @ApiOperation(value = "移除摄像头", notes = "传参ccId 是中间表id，只是删除关联关系;同时修改摄像头状态为未配置",
+            response = SimpleMessage.class)
+    @RequestMapping(value = "/{ccId}/{cameraId}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String ccId,@PathVariable String cameraId) {
+        return service.delete(ccId,cameraId);
+    }
+}
+package com.hanboard.monitor.controller;
+
+import com.hanboard.monitor.service.RecorderService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.school.monitor.model.Recorder;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@RestController
+@RequestMapping("/monitor/recorder")
+@Api(description = "录相机管理")
+public class RecorderController {
+
+    @Autowired
+    RecorderService service;
+
+    @ApiOperation(value = "录相机查询", notes = "查询条件不加引号：{filter:enterType=0|1;studentName=xxx;" +
+            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+            "order:enterTime=desc}", response = PagerQuery.class)
+    @RequestMapping(value = "/list", method = RequestMethod.GET)
+    public SimpleMessage query(PagerQuery pagerQuery) {
+        Pager pager = service.query(pagerQuery);
+        return SimpleMessage.info(pager);
+    }
+
+    @ApiOperation(value = "全部录相机列表", notes = "添加摄像头时的下拉列表", response = Recorder.class)
+    @RequestMapping(value = "", method = RequestMethod.GET)
+    public SimpleMessage getAllRecorder() {
+        return service.getAllRecorder();
+    }
+
+    @ApiOperation(value = "添加录相机", notes = "学校id，学校名称应从rpc获取", response = Recorder.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestBody Recorder recorder) {
+        return service.insert(recorder);
+    }
+
+    @ApiOperation(value = "删除录像机", notes = "级连删除", response = SimpleMessage.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String id) {
+        return service.delete(id);
+    }
+
+    @ApiOperation(value = "取得详情", notes = "修改时初始化", response = Recorder.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.GET)
+    public SimpleMessage getById(@PathVariable String id) {
+        return service.getById(id);
+    }
+
+    @ApiOperation(value = "修改录像机", notes = "修改", response = Recorder.class)
+    @RequestMapping(value = "", method = RequestMethod.PUT)
+    public SimpleMessage update(@RequestBody Recorder form) {
+        return service.update(form);
+    }
+}
+package com.hanboard.monitor.controller;
+
+import com.hanboard.monitor.service.StageService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.school.monitor.model.Stage;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ * 配制学段时会自动生成教室
+ * 真正的教室页面只负责展示和绑定
+ */
+@RestController
+@RequestMapping("/monitor/stage")
+@Api(description = "学段班级管理")
+public class StageController {
+
+    @Autowired
+    StageService service;
+
+    @ApiOperation(value = "学段教室查询", notes = "查询条件不加引号：{filter:enterType=0|1;studentName=xxx;" +
+            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+            "order:enterTime=desc}", response = PagerQuery.class)
+    @RequestMapping(value = "", method = RequestMethod.GET)
+    public SimpleMessage query(PagerQuery pagerQuery) {
+        Pager pager = service.query(pagerQuery);
+        return SimpleMessage.info(pager);
+    }
+
+    @ApiOperation(value = "添加学段教室", notes = "学校id，学校名称应从rpc获取", response = Stage.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestBody Stage form) {
+        return service.insert(form);
+    }
+
+    @ApiOperation(value = "删除学段教室", notes = "级连删除", response = SimpleMessage.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String id) {
+        return service.delete( id);
+    }
+
+    @ApiOperation(value = "取得详情", notes = "修改时初始化", response = Stage.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.GET)
+    public SimpleMessage getById(@PathVariable String id) {
+        return service.getById(id);
+    }
+
+    @ApiOperation(value = "修改学段教室", notes = "修改", response = Stage.class)
+    @RequestMapping(value = "", method = RequestMethod.PUT)
+    public SimpleMessage update(@RequestBody Stage form) {
+        return service.update(form);
+    }
+}
+package com.hanboard.monitor.dao;
+
+import com.hanboard.school.monitor.model.Camera;
+import com.hanboard.school.monitor.model.CameraPlayParam;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public interface CameraDao {
+    void insert(Camera form);
+
+    List<Camera> query(Map map);
+    CameraPlayParam getPlayParam(@Param("id") String id);
+
+    void delete(@Param("id") String id);
+    void updateUseStatus(@Param("id") String id,@Param("useStatus") Integer useStatus);
+    void update(Camera form);
+
+    List<CameraPlayParam> getByRpc(@Param("schoolId") String schoolId, @Param("classCode") String[] classCode);
+
+    void insertUserCamera(@Param("userId") String userId, @Param("cameraId") String cameraId);
+    void deleteUserCamera(@Param("userId") String userId);
+    String getCameraIdByUserId(@Param("userId") String userId);
+}
+package com.hanboard.monitor.dao;
+
+import com.hanboard.school.monitor.model.Classroom;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public interface ClassroomDao {
+    /**
+     * url 默认不入，看以后接口如何获取
+     * @param cameraId
+     * @param classroomId
+     */
+    void insert(@Param("cameraId") String cameraId, @Param("classroomId") String classroomId);
+
+    /**
+     * 不分页
+     * @param id
+     * @return
+     */
+    List<Classroom> query(@Param("id") String id);
+
+    void delete(@Param("id") String id);
+
+}
+package com.hanboard.monitor.dao;
+
+import com.hanboard.school.monitor.model.Recorder;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public interface RecorderDao {
+    void insert(Recorder recorder);
+
+    List<Recorder> query(Map map);
+    List<Recorder> getAllRecorder();
+
+    void delete(@Param("id") String id);
+    void update(Recorder form);
+}
+package com.hanboard.monitor.dao;
+
+import com.hanboard.school.monitor.model.Classroom;
+import com.hanboard.school.monitor.model.Stage;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public interface StageDao {
+    void insert(Stage form);
+
+    List<Stage> query(Map map);
+    Stage getStageById(@Param("id") String id);
+
+    void insertClassRoom(@Param("classroomList") List<Classroom> classroomList);
+
+    void update(Stage form);
+    void delete(@Param("id") String id);
+
+    void delGrade(@Param("stageId") String stageId, @Param("maxGrade") Integer maxGrade);
+    void delClass(@Param("stageId") String stageId, @Param("maxClass") Integer maxClass);
+}
+package com.hanboard.monitor.rpcServiceImpl;
+
+import com.hanboard.monitor.service.CameraService;
+import com.hanboard.school.monitor.model.CameraPlayParam;
+import com.hanboard.school.monitor.service.MonitorServiceDefine;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/3/12.
+ */
+public class MonitorServiceImpl implements MonitorServiceDefine {
+    @Autowired
+    CameraService cameraService;
+
+
+    @Override
+    public List<CameraPlayParam> getByRpc(String schoolId, String[] classCode) {
+        return cameraService.getByRpc(schoolId,classCode);
+    }
+}
+package com.hanboard.monitor.service;
+
+import com.github.orderbyhelper.OrderByHelper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.hanboard.monitor.dao.CameraDao;
+import com.hanboard.monitor.utils.RpcUtils;
+import com.hanboard.platform.framework.security.usermodule.SimpleUser;
+import com.hanboard.platform.framework.security.util.UserUtil;
+import com.hanboard.school.enumeration.CameraUseStatusEnum;
+import com.hanboard.school.monitor.model.Camera;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.data.page.ParameterUtil;
+import com.hanboard.school.monitor.model.CameraPlayParam;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.*;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@Service
+@Validated()
+@Transactional
+public class CameraService {
+    @Autowired
+    CameraDao dao;
+
+    public Pager query(PagerQuery pagerQuery) {
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (StringUtils.isNotEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+        List<Camera> list = dao.query(map);
+        PageInfo pageInfo = new PageInfo(list);
+        Pager pager = new Pager<Camera>(pageInfo.getTotal(), pageInfo.getList());
+        return pager;
+    }
+
+    public SimpleMessage insert(Camera form) {
+        form.setUseStatus(0);
+        dao.insert(form);
+        return SimpleMessage.info("添加摄像头成功");
+    }
+
+    public SimpleMessage delete(String id) {
+        dao.delete(id);
+        return SimpleMessage.info("删除摄像头成功");
+    }
+
+    public SimpleMessage update(Camera form) {
+        dao.update(form);
+        return SimpleMessage.info("修改摄像头成功");
+    }
+
+    public SimpleMessage getCameraByRecorder(String recorderId) {
+        Map map = new HashMap();
+        map.put("recorderId", recorderId);
+        map.put("useStatus", CameraUseStatusEnum.NO_USE.getValue().toString());
+        List<Camera> list = dao.query(map);
+        return SimpleMessage.info(list);
+    }
+
+    public SimpleMessage getPlayParam(String cameraId) {
+        CameraPlayParam playParam = dao.getPlayParam(cameraId);
+        return SimpleMessage.info(playParam);
+    }
+
+    public SimpleMessage getById(String id) {
+        Map map = new HashMap();
+        map.put("id", id);
+        return SimpleMessage.info(dao.query(map).get(0));
+    }
+
+    public List<CameraPlayParam> getByRpc(String schoolId, String[] classCode) {
+        List<CameraPlayParam> list = dao.getByRpc(schoolId, classCode);
+        return list;
+    }
+
+    public SimpleMessage getOneByHome() {
+        SimpleUser user = UserUtil.getUser();
+        String cameraId = dao.getCameraIdByUserId(user.getId());
+        CameraPlayParam cameraPlayParam = dao.getPlayParam(cameraId);
+        List<CameraPlayParam> list = new ArrayList<>();
+        if (null!=cameraPlayParam) {
+            list.add(cameraPlayParam);
+        }
+        return SimpleMessage.info(list);
+    }
+
+    public SimpleMessage getAllByHome() {
+        List<String> ids = RpcUtils.getSchoolByAuthority();
+        String schoolId = "";
+        if (CollectionUtils.isNotEmpty(ids)) {
+            schoolId = ids.get(0);
+        }
+        List<CameraPlayParam> list = dao.getByRpc(schoolId, null);
+        return SimpleMessage.info(list);
+    }
+
+    /**
+     * 先删除再插入
+     *
+     * @param cameraId
+     * @return
+     */
+    public SimpleMessage updateUserCamera(String cameraId) {
+
+        SimpleUser user = UserUtil.getUser();
+        dao.deleteUserCamera(user.getId());
+        dao.insertUserCamera(user.getId(), cameraId);
+        return SimpleMessage.info("配置用户摄像头成功");
+    }
+
+}
+package com.hanboard.monitor.service;
+
+import com.hanboard.monitor.dao.CameraDao;
+import com.hanboard.monitor.dao.ClassroomDao;
+import com.hanboard.school.enumeration.CameraUseStatusEnum;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.school.monitor.model.Classroom;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@Service
+@Validated()
+@Transactional
+public class ClassroomService {
+    @Autowired
+    ClassroomDao dao;
+    @Autowired
+    CameraDao cameraDao;
+
+    public SimpleMessage query(String stageId) {
+
+        List<Classroom> list = dao.query(stageId);
+        return SimpleMessage.info(list);
+    }
+    public SimpleMessage insert(String cameraId, String classroomId ){
+        dao.insert(cameraId,classroomId);
+        cameraDao.updateUseStatus(cameraId, CameraUseStatusEnum.HAVE_USE.getValue());
+        return SimpleMessage.info("配置摄像头成功");
+    }
+
+    public SimpleMessage delete(String ccId,String cameraId ){
+        cameraDao.updateUseStatus(cameraId,CameraUseStatusEnum.NO_USE.getValue());
+        dao.delete(ccId);
+        return SimpleMessage.info("移除摄像头成功");
+    }
+}
+package com.hanboard.monitor.service;
+
+import com.github.orderbyhelper.OrderByHelper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.hanboard.monitor.dao.RecorderDao;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.data.page.ParameterUtil;
+import com.hanboard.school.monitor.model.Recorder;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@Service
+@Validated()
+@Transactional
+public class RecorderService {
+    @Autowired
+    RecorderDao dao;
+
+    public Pager query(PagerQuery pagerQuery) {
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (StringUtils.isNotEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+        List<Recorder> list = dao.query(map);
+        PageInfo pageInfo = new PageInfo(list);
+        Pager pager = new Pager<Recorder>(pageInfo.getTotal(), pageInfo.getList());
+        return pager;
+    }
+    public SimpleMessage insert(Recorder recorder){
+        dao.insert(recorder);
+        return SimpleMessage.info("添加录像机成功");
+    }
+    public SimpleMessage delete(String  id ){
+        dao.delete(id);
+        return SimpleMessage.info("删除录像机成功");
+    }
+    public SimpleMessage getAllRecorder(){
+        return SimpleMessage.info(dao.getAllRecorder());
+    }
+
+    public SimpleMessage getById(String id){
+        Map map = new HashMap();
+        map.put("id",id);
+        return SimpleMessage.info(dao.query(map).get(0));
+    }
+
+    public SimpleMessage update(Recorder form){
+        dao.update(form);
+        return SimpleMessage.info("修改录像机成功");
+    }
+}
+package com.hanboard.monitor.service;
+
+import com.github.orderbyhelper.OrderByHelper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.hanboard.monitor.dao.StageDao;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.data.page.ParameterUtil;
+import com.hanboard.platform.framework.utils.UUIDUtil;
+import com.hanboard.school.monitor.model.Classroom;
+import com.hanboard.school.monitor.model.Stage;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+
+import java.text.MessageFormat;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+@Service
+@Validated()
+@Transactional
+public class StageService {
+    @Autowired
+    StageDao dao;
+
+    public Pager query(PagerQuery pagerQuery) {
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (StringUtils.isNotEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+        List<Stage> list = dao.query(map);
+        PageInfo pageInfo = new PageInfo(list);
+        Pager pager = new Pager<Stage>(pageInfo.getTotal(), pageInfo.getList());
+        return pager;
+    }
+
+    public SimpleMessage insert(Stage form) {
+
+        dao.insert(form);
+        Integer maxGrade = form.getMaxGrade();
+        Integer maxClass = form.getMaxClass();
+        String stageId = form.getId();
+
+        List<Classroom> classroomList = getClassRoomByGrageClass(stageId, form.getStageName(), maxGrade, maxClass);
+        dao.insertClassRoom(classroomList);
+        return SimpleMessage.info("添加学段教室成功");
+    }
+
+    private List<Classroom> getClassRoomByGrageClass(String stageId, String stageName,
+                                                     Integer maxGrade, Integer maxClass) {
+        List<Classroom> classroomList = new ArrayList<>();
+        //2层循环生成 i*j 的教室
+        for (int i = 0; i < maxGrade; i++) {
+            for (int j = 0; j < maxClass; j++) {
+                Integer gradeNum = i + 1;
+                Integer classNum = j + 1;
+                String roomId = UUIDUtil.getUUID();
+                //生成2位年级号2位班级号
+                String code = String.format("%02d", gradeNum) + String.format("%02d", classNum);
+                if (stageName.equals("小学")) {
+                    code = "01" + code;
+                } else {
+                    code = "02" + code;
+                }
+                String name = MessageFormat.format("{0}年级{1}班", gradeNum, classNum);
+                classroomList.add(new Classroom(roomId, stageId, name, code, gradeNum, classNum));
+            }
+        }
+        return classroomList;
+    }
+
+    /**
+     * 年级增加，班增加，
+     * 年级增加，班减少，
+     * 年级减少，班增加，
+     * 只有班级号比原有的大，或年级号比原有的大才加入集合
+     *
+     * @param stageId
+     * @param stageName
+     * @param maxGrade
+     * @param maxGrade0
+     * @param maxClass
+     * @param maxClass0
+     * @return
+     */
+    private List<Classroom> getAddClassRoom(String stageId, String stageName,
+                                            Integer maxGrade, Integer maxGrade0,
+                                            Integer maxClass, Integer maxClass0) {
+        List<Classroom> classroomList = new ArrayList<>();
+        //2层循环生成 i*j 的教室
+        for (int i = 0; i < maxGrade; i++) {
+            for (int j = 0; j < maxClass; j++) {
+                Integer gradeNum = i + 1;
+                Integer classNum = j + 1;
+                String roomId = UUIDUtil.getUUID();
+                //生成2位年级号2位班级号
+                String code = String.format("%02d", gradeNum) + String.format("%02d", classNum);
+                if (stageName.equals("小学")) {
+                    code = "01" + code;
+                } else {
+                    code = "02" + code;
+                }
+                String name = MessageFormat.format("{0}年级{1}班", gradeNum, classNum);
+                if (classNum > maxClass0 || gradeNum > maxGrade0) {
+                    classroomList.add(new Classroom(roomId, stageId, name, code, gradeNum, classNum));
+                }
+            }
+        }
+        return classroomList;
+    }
+
+    public SimpleMessage delete(String id) {
+        dao.delete(id);
+        return SimpleMessage.info("删除学段教室成功");
+    }
+
+    public SimpleMessage getById(String id) {
+        Map map = new HashMap();
+        map.put("id", id);
+        return SimpleMessage.info(dao.query(map).get(0));
+    }
+
+    /**
+     * 1 修改本身
+     * 2 对比年级班级，删除不要的，再加新增的
+     *
+     * @param form
+     * @return
+     */
+    public SimpleMessage update(Stage form) {
+        Stage old = (Stage) getById(form.getId()).getData();
+        Integer maxGrade0 = old.getMaxGrade();
+        Integer maxClass0 = old.getMaxClass();
+
+        dao.update(form);
+        //删除教室
+        dao.delGrade(form.getId(), form.getMaxGrade());
+        dao.delClass(form.getId(), form.getMaxClass());
+        //新增教室
+        List<Classroom> classroomList = getAddClassRoom(form.getId(), form.getStageName(),
+                form.getMaxGrade(), maxGrade0,
+                form.getMaxClass(),maxClass0);
+        if(CollectionUtils.isNotEmpty(classroomList)){
+
+            dao.insertClassRoom(classroomList);
+        }
+        return SimpleMessage.info("修改学段教室成功");
+    }
+}
+package com.hanboard.monitor.utils;
+
+import com.hanboard.platform.framework.security.util.UserUtil;
+import com.hanboard.platform.framework.utils.rpc.RpcUtil;
+import com.hanboard.system.service.OrgServiceDefine;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/3/28.
+ */
+public class RpcUtils {
+    public static List<String> getSchoolByAuthority() {
+        OrgServiceDefine orgServiceDefine = RpcUtil.getRpcService("system_OrgSesrviceDefine");
+        return orgServiceDefine.getSchoolByAuthority(UserUtil.getUser().getId());
+    }
+}
+package com.hanboard.noticemanagerment.controller;
+
+import com.hanboard.school.notice.model.Notice;
+import com.hanboard.school.notice.model.NoticeManagerment;
+import com.hanboard.noticemanagerment.service.NoticeService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import io.swagger.annotations.ApiParam;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * Created by Mike on 2017/2/16.
+ */
+@RestController
+@RequestMapping("/notice")
+@Api(description = "公告管理")
+public class NoticeController {
+    @Autowired
+    private NoticeService noticeService;
+
+    @ApiOperation(value = "新增公告", response = SimpleMessage.class)
+    @RequestMapping(value = "add", method = RequestMethod.POST)
+    public SimpleMessage add(@ApiParam(value = "公告实体", required = true) @RequestBody Notice notice) {
+        return noticeService.save(notice, true);
+    }
+    @ApiOperation(value = "审核公告", response = SimpleMessage.class)
+    @RequestMapping(value = "audit", method = RequestMethod.POST)
+    public SimpleMessage audit(@ApiParam(value = "公告实体", required = true) @RequestBody NoticeManagerment noticeManagerment) {
+        return noticeService.audit(noticeManagerment);
+    }
+    @ApiOperation(value = "修改公告", response = SimpleMessage.class)
+    @RequestMapping(value = "update", method = RequestMethod.POST)
+    public SimpleMessage update(@ApiParam(value = "公告实体", required = true) @RequestBody Notice notice) {
+        return noticeService.save(notice, false);
+    }
+    @ApiOperation(value = "删除公告", response = SimpleMessage.class)
+    @RequestMapping(value = "delete/{id}", method = RequestMethod.GET)
+    public SimpleMessage delete(@ApiParam(value = "公告ID", required = true) @PathVariable String id) {
+        return noticeService.delete(id);
+    }
+    @ApiOperation(value = "公告管理获取公告信息", response = Notice.class)
+    @RequestMapping(value = "getNotice/{id}", method = RequestMethod.GET)
+    public SimpleMessage getNotice(@ApiParam(value = "公告ID", required = true) @PathVariable String id) {
+        return noticeService.getNotice(id);
+    }
+    @ApiOperation(value = "根据ID获取数据", response = Notice.class)
+    @RequestMapping(value = "getBySchoolId/{schoolId}", method = RequestMethod.GET)
+    public SimpleMessage getBySchoolId(@ApiParam(value = "公告ID", required = true) @PathVariable String schoolId) {
+        return noticeService.getBySchoolId(schoolId);
+    }
+    @ApiOperation(value = "公告查看获取公告信息", response = Notice.class)
+    @RequestMapping(value = "getNoticeInfo/{id}", method = RequestMethod.GET)
+    public SimpleMessage getNoticeInfo(@ApiParam(value = "公告ID", required = true) @PathVariable String id) {
+        return noticeService.getNoticeInfo(id);
+    }
+    @ApiOperation(value = "公告管理分页查询", response = NoticeManagerment.class)
+    @RequestMapping(value = "getList", method = RequestMethod.GET)
+    public SimpleMessage getList(@ApiParam(value = "查询类", required = true) PagerQuery pagerQuery) {
+        return noticeService.getList(pagerQuery);
+    }
+    @ApiOperation(value = "公告查看分页查询", response = NoticeManagerment.class)
+    @RequestMapping(value = "getViewList", method = RequestMethod.GET)
+    public SimpleMessage getViewList(@ApiParam(value = "查询类", required = true) PagerQuery pagerQuery) {
+        return noticeService.getViewList(pagerQuery);
+    }
+}
+package com.hanboard.noticemanagerment.dao;
+
+
+import com.hanboard.school.notice.model.NoticeFile;
+
+import java.util.List;
+
+public interface NoticeFileDao {
+    int deleteByPrimaryKey(String id);
+
+    int deleteByNoticeId(String id);
+
+    int insert(NoticeFile record);
+
+    int insertSelective(NoticeFile record);
+
+    NoticeFile selectByPrimaryKey(String id);
+
+    List<NoticeFile> getByNoticeId(String id);
+
+    int updateByPrimaryKeySelective(NoticeFile record);
+
+    int updateByPrimaryKey(NoticeFile record);
+}
+package com.hanboard.noticemanagerment.dao;
+
+
+import com.hanboard.school.notice.model.NoticeManagerment;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+import java.util.Map;
+
+public interface NoticeManagermentDao {
+    int deleteByPrimaryKey(String id);
+
+    int insert(NoticeManagerment record);
+
+    int insertSelective(NoticeManagerment record);
+
+    NoticeManagerment selectByPrimaryKey(String id);
+    List<NoticeManagerment> selectBySchoolId(String id);
+
+    List<NoticeManagerment> getList(@Param("filter")Map filter);
+    List<NoticeManagerment> getViewList(@Param("filter")Map filter);
+
+    int updateByPrimaryKeySelective(NoticeManagerment record);
+
+    int updateByPrimaryKey(NoticeManagerment record);
+}
+package com.hanboard.noticemanagerment.dao;
+
+
+import com.hanboard.school.notice.model.NoticeOrganization;
+
+import java.util.List;
+
+public interface NoticeOrganizationDao {
+    int deleteByPrimaryKey(String id);
+
+    int deleteByNoticeId(String id);
+
+    int insert(NoticeOrganization record);
+
+    int insertSelective(NoticeOrganization record);
+
+    NoticeOrganization selectByPrimaryKey(String id);
+
+    List<NoticeOrganization> getByNoticeId(String id);
+
+    int updateByPrimaryKeySelective(NoticeOrganization record);
+
+    int updateByPrimaryKey(NoticeOrganization record);
+}
+package com.hanboard.noticemanagerment.dao;
+
+
+import com.hanboard.school.notice.model.NoticeUser;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+
+public interface NoticeUserDao {
+    int deleteByPrimaryKey(String id);
+
+    List<NoticeUser> getCountByNoticeId(@Param("ids") List<String> ids);
+
+    int deleteByNoticeId(String id);
+
+    int insert(NoticeUser record);
+
+    int insertSelective(NoticeUser record);
+
+    NoticeUser selectByPrimaryKey(String id);
+
+    List<NoticeUser> getByNoticeId(String id);
+
+    int updateByPrimaryKeySelective(NoticeUser record);
+
+    int updateByPrimaryKey(NoticeUser record);
+}
+package com.hanboard.noticemanagerment.dao;
+
+import com.hanboard.school.notice.model.NoticeUserRecord;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+
+public interface NoticeUserRecordDao {
+    int deleteByPrimaryKey(String id);
+
+    int insert(NoticeUserRecord record);
+
+    int insertSelective(NoticeUserRecord record);
+
+    NoticeUserRecord selectRead(@Param("noticeId") String noticeId,@Param("userId") String userId);
+    NoticeUserRecord selectByPrimaryKey(String id);
+
+    int updateByPrimaryKeySelective(NoticeUserRecord record);
+
+    int updateByPrimaryKey(NoticeUserRecord record);
+
+    List<NoticeUserRecord> getReadByNoticeId(@Param("ids") List<String> ids);
+}
+package com.hanboard.noticemanagerment.rpcServiceImpl;
+
+import com.hanboard.noticemanagerment.service.NoticeService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.school.notice.service.NoticeServiceDefine;
+import org.springframework.beans.factory.annotation.Autowired;
+
+/**
+ * Created by Mike on 2017/4/5.
+ */
+public class NoticeServiceImpl implements NoticeServiceDefine {
+    @Autowired
+    private NoticeService noticeService;
+
+    public SimpleMessage queryNotice(PagerQuery pagerQuery){
+        return noticeService.getViewList(pagerQuery);
+    }
+}
+package com.hanboard.noticemanagerment.service;
+
+import com.github.orderbyhelper.OrderByHelper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.google.common.base.Strings;
+import com.hanboard.noticemanagerment.dao.*;
+import com.hanboard.noticemanagerment.utils.RpcUtils;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.data.page.ParameterUtil;
+import com.hanboard.platform.framework.security.usermodule.SimpleUser;
+import com.hanboard.platform.framework.security.util.UserUtil;
+import com.hanboard.platform.framework.utils.JsonUtil;
+import com.hanboard.platform.framework.utils.PrimaryKeyTool;
+import com.hanboard.school.notice.model.*;
+import com.hanboard.system.model.OrganizationExt;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * Created by Mike on 2017/2/16.
+ */
+@Service
+public class NoticeService {
+    @Autowired
+    private NoticeUserDao noticeUserDao;
+    @Autowired
+    private NoticeFileDao noticeFileDao;
+    @Autowired
+    private NoticeOrganizationDao noticeOrganizationDao;
+    @Autowired
+    private NoticeUserRecordDao noticeUserRecordDao;
+    @Autowired
+    private NoticeManagermentDao noticeManagermentDao;
+    private Logger logger = LoggerFactory.getLogger(getClass());
+
+    @Transactional
+    public SimpleMessage save(Notice notice, boolean isCreate) {
+        Date date = new Date();
+        NoticeManagerment noticeManagerment = notice.getNoticeManagerment();
+        String mId = noticeManagerment.getId();
+        noticeManagerment.setUpdateTime(date);
+        if (noticeManagerment.getIsAudit() == YesNoEnum.NO.getValue()) {
+            noticeManagerment.setAuditId("");
+            noticeManagerment.setAuditor("");
+            noticeManagerment.setAuditStatus(AuditEnum.NO.getValue());
+        } else {
+            noticeManagerment.setAuditStatus(AuditEnum.WAIT.getValue());
+        }
+        if (isCreate) {
+            SimpleUser user = UserUtil.getUser();
+            mId = PrimaryKeyTool.generalUUIDPrimaryKey();
+            noticeManagerment.setId(mId);
+            noticeManagerment.setCreateTime(date);
+            if (noticeManagerment.getIsAudit() == YesNoEnum.YES.getValue()) {
+                noticeManagerment.setAuditStatus(AuditEnum.WAIT.getValue());
+            } else {
+                noticeManagerment.setAuditStatus(AuditEnum.NO.getValue());
+            }
+            noticeManagerment.setMessageTime(date);
+            noticeManagerment.setCreateId(user.getId());
+            noticeManagerment.setCreator(user.getUsername());
+            noticeManagermentDao.insert(noticeManagerment);
+        }
+        noticeManagermentDao.updateByPrimaryKeySelective(noticeManagerment);
+
+        noticeFileDao.deleteByNoticeId(mId);
+        noticeUserDao.deleteByNoticeId(mId);
+        noticeOrganizationDao.deleteByNoticeId(mId);
+        List<NoticeFile> noticeFiles = notice.getNoticeFiles();
+        if (noticeFiles != null && noticeFiles.size() > 0) {
+            for (NoticeFile noticeFile : noticeFiles) {
+                noticeFile.setId(PrimaryKeyTool.generalUUIDPrimaryKey());
+                noticeFile.setNoticeId(mId);
+                noticeFile.setCreateTime(date);
+                noticeFile.setUpdateTime(date);
+                noticeFileDao.insert(noticeFile);
+            }
+        }
+        if (noticeManagerment.getSendRange() == SendTypeEnum.USER.getValue()) {
+            List<NoticeUser> noticeUsers = notice.getNoticeUsers();
+            if (noticeUsers != null && noticeUsers.size() > 0) {
+                for (NoticeUser noticeUser : noticeUsers) {
+                    noticeUser.setUpdateTime(date);
+                    noticeUser.setId(PrimaryKeyTool.generalUUIDPrimaryKey());
+                    noticeUser.setNoticeId(mId);
+                    noticeUser.setCreateTime(date);
+                    noticeUserDao.insert(noticeUser);
+                }
+            }
+        }
+        if (noticeManagerment.getSendRange() == SendTypeEnum.ORG.getValue()) {
+            List<NoticeOrganization> noticeOrganizations = notice.getNoticeOrganizations();
+            if (noticeOrganizations != null && noticeOrganizations.size() > 0) {
+                for (NoticeOrganization noticeOrganization : noticeOrganizations) {
+                    noticeOrganization.setUpdateTime(date);
+                    noticeOrganization.setId(PrimaryKeyTool.generalUUIDPrimaryKey());
+                    noticeOrganization.setNoticeId(mId);
+                    noticeOrganization.setCreateTime(date);
+                    noticeOrganizationDao.insert(noticeOrganization);
+                }
+            }
+        }
+        return SimpleMessage.info("保存成功");
+    }
+
+    @Transactional
+    public SimpleMessage delete(String id) {
+        noticeUserDao.deleteByNoticeId(id);
+        noticeFileDao.deleteByNoticeId(id);
+        noticeOrganizationDao.deleteByNoticeId(id);
+        noticeManagermentDao.deleteByPrimaryKey(id);
+        return SimpleMessage.info("删除成功");
+    }
+
+    @Transactional
+    public SimpleMessage audit(NoticeManagerment noticeManagerment) {
+        noticeManagermentDao.updateByPrimaryKeySelective(noticeManagerment);
+        return SimpleMessage.info("审核成功");
+    }
+
+    public SimpleMessage getList(PagerQuery pagerQuery) {
+        logger.info("开始页码{}，页面长度{},查询条件{},排序条件{},获取公告管理列表",
+                pagerQuery.getStart(), pagerQuery.getLength(), pagerQuery.getFilter(), pagerQuery.getOrder());
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (!Strings.isNullOrEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+        List<NoticeManagerment> pageList = noticeManagermentDao.getList(map);
+        if (pageList.size() > 0) {
+            List<String> ids = pageList.stream().map(s -> s.getId()).collect(Collectors.toList());
+            List<NoticeUserRecord> noticeUserRecords = noticeUserRecordDao.getReadByNoticeId(ids);
+            List<NoticeUser> noticeUsers = noticeUserDao.getCountByNoticeId(ids);
+            for (NoticeManagerment noticeManagerment : pageList) {
+                long read = 0;
+                if (noticeManagerment.getAuditStatus() == AuditEnum.NO.getValue() || noticeManagerment.getAuditStatus() == AuditEnum.PASS.getValue()) {
+                    read = noticeUserRecords.stream().filter(s -> s.getNoticeId().equals(noticeManagerment.getId())).count();
+                }
+                if (noticeManagerment.getSendRange() == SendTypeEnum.ALL.getValue()) {
+                    noticeManagerment.setReadInfo(read + "/全部");
+                }
+                if (noticeManagerment.getSendRange() == SendTypeEnum.ORG.getValue()) {
+                    noticeManagerment.setReadInfo(read + "/机构");
+                }
+                if (noticeManagerment.getSendRange() == SendTypeEnum.USER.getValue()) {
+                    long count = noticeUsers.stream().filter(s -> s.getNoticeId().equals(noticeManagerment.getId())).count();
+                    noticeManagerment.setReadInfo(read + "/" + count);
+                }
+            }
+        }
+        PageInfo pageInfo = new PageInfo(pageList);
+        Pager<NoticeManagerment> pager = new Pager<>(pageInfo.getTotal(), pageInfo.getList());
+        logger.info("pager:{}", JsonUtil.toJSON(pager));
+        return SimpleMessage.info(pager);
+    }
+
+    public SimpleMessage getViewList(PagerQuery pagerQuery) {
+        logger.info("开始页码{}，页面长度{},查询条件{},排序条件{},获取公告查看列表",
+                pagerQuery.getStart(), pagerQuery.getLength(), pagerQuery.getFilter(), pagerQuery.getOrder());
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (!Strings.isNullOrEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        String userId = UserUtil.getUser().getId();
+        map.put("userId", userId);
+        List<String> schoolIds = RpcUtils.getAuthoritySchoolIds();
+        if (schoolIds != null && schoolIds.size() > 0) {
+            map.put("schoolIds", schoolIds);
+        }
+        List<OrganizationExt> orgs = RpcUtils.getAuthorityOrgIds();
+        if (orgs != null && orgs.size() > 0) {
+            List<String> orgIds = orgs.stream().map(s -> s.getId()).collect(Collectors.toList());
+            map.put("orgIds", orgIds);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+        List<NoticeManagerment> pageList = noticeManagermentDao.getViewList(map);
+        if (pageList.size() > 0) {
+            List<String> ids = pageList.stream().map(s -> s.getId()).collect(Collectors.toList());
+            List<NoticeUserRecord> noticeUserRecords = noticeUserRecordDao.getReadByNoticeId(ids);
+            for (NoticeManagerment noticeManagerment : pageList) {
+                NoticeUserRecord noticeUserRecord = noticeUserRecords.stream().filter(s -> s.getNoticeId().equals(noticeManagerment.getId()) && s.getUserId().equals(userId)).findFirst().orElse(null);
+                if (noticeUserRecord == null) {
+                    noticeManagerment.setIsRead(YesNoEnum.NO.getValue());
+                } else {
+                    noticeManagerment.setIsRead(YesNoEnum.YES.getValue());
+                }
+            }
+        }
+        PageInfo pageInfo = new PageInfo(pageList);
+        Pager<NoticeManagerment> pager = new Pager<>(pageInfo.getTotal(), pageInfo.getList());
+        logger.info("pager:{}", JsonUtil.toJSON(pager));
+        return SimpleMessage.info(pager);
+    }
+
+    public SimpleMessage getNotice(String id) {
+        Notice notice = new Notice();
+        NoticeManagerment noticeManagerment = noticeManagermentDao.selectByPrimaryKey(id);
+        if (noticeManagerment == null) {
+            return SimpleMessage.fail("该公告不存在");
+        }
+        notice.setNoticeManagerment(noticeManagerment);
+        notice.setNoticeFiles(noticeFileDao.getByNoticeId(id));
+        List<NoticeUser> noticeUsers = new ArrayList<>();
+        List<NoticeOrganization> noticeOrganizations = new ArrayList<>();
+        if (noticeManagerment.getSendRange() == SendTypeEnum.USER.getValue()) {
+            noticeUsers = noticeUserDao.getByNoticeId(id);
+        }
+        if (noticeManagerment.getSendRange() == SendTypeEnum.ORG.getValue()) {
+            noticeOrganizations = noticeOrganizationDao.getByNoticeId(id);
+        }
+        notice.setNoticeOrganizations(noticeOrganizations);
+        notice.setNoticeUsers(noticeUsers);
+        return SimpleMessage.info(notice);
+    }
+
+    @Transactional
+    public SimpleMessage getNoticeInfo(String id) {
+        Notice notice = new Notice();
+        NoticeManagerment noticeManagerment = noticeManagermentDao.selectByPrimaryKey(id);
+        if (noticeManagerment == null) {
+            return SimpleMessage.fail("该公告不存在");
+        }
+        notice.setNoticeManagerment(noticeManagerment);
+        notice.setNoticeFiles(noticeFileDao.getByNoticeId(id));
+        String userId = UserUtil.getUser().getId();
+        NoticeUserRecord noticeUserRecord = noticeUserRecordDao.selectRead(id, userId);
+        if (noticeUserRecord == null) {
+            noticeUserRecord = new NoticeUserRecord();
+            noticeUserRecord.setId(PrimaryKeyTool.generalUUIDPrimaryKey());
+            noticeUserRecord.setNoticeId(id);
+            noticeUserRecord.setUserId(userId);
+            noticeUserRecord.setCreateTime(new Date());
+            noticeUserRecordDao.insert(noticeUserRecord);
+        }
+        return SimpleMessage.info(notice);
+    }
+
+    public SimpleMessage getBySchoolId(String schoolId){
+        List<NoticeManagerment> noticeManagerments = noticeManagermentDao.selectBySchoolId(schoolId);
+        return SimpleMessage.info(noticeManagerments);
+    }
+
+}
+package com.hanboard.noticemanagerment.utils;
+
+import com.hanboard.platform.framework.security.util.UserUtil;
+import com.hanboard.platform.framework.utils.rpc.RpcUtil;
+import com.hanboard.system.model.OrganizationExt;
+import com.hanboard.system.service.OrgServiceDefine;
+
+import java.util.List;
+
+/**
+ * Created by Mike on 2017/2/22.
+ */
+public class RpcUtils {
+    public static List<String> getAuthoritySchoolIds() {
+        OrgServiceDefine orgServiceDefine = RpcUtil.getRpcService("system_OrgSesrviceDefine");
+        return orgServiceDefine.getSchoolByAuthority(UserUtil.getUser().getId());
+    }
+    public static List<OrganizationExt> getAuthorityOrgIds() {
+        OrgServiceDefine orgServiceDefine = RpcUtil.getRpcService("system_OrgSesrviceDefine");
+        return orgServiceDefine.getOrgByAuthority(UserUtil.getUser().getId());
+    }
+}
+package com.hanboard.outcomerenter.controller;
+
+import com.hanboard.outcomerenter.model.OutcomerEnter;
+import com.hanboard.outcomerenter.service.OutcomerEnterService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * Created by gaoxiaobo on 2017/2/9.
+ */
+@RestController
+@RequestMapping("/outcomerEnter")
+@Api(description = "外来人员登记管理")
+public class OutcomerEnterController {
+
+    @Autowired
+    OutcomerEnterService service;
+
+    @ApiOperation(value = "外来人员登记记录查询", notes = "查询条件不加引号：{filter:enterType=0|1;name=xxx;" +
+            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+            "order:enterTime=desc}", response = PagerQuery.class)
+    @RequestMapping(value = "/list", method = RequestMethod.GET)
+    public SimpleMessage query(PagerQuery pagerQuery) {
+        Pager pager = service.query(pagerQuery);
+        return SimpleMessage.info(pager);
+    }
+
+    @ApiOperation(value = "添加外来人员登记记录", notes = "离开时间可以为空，离开时点击离开按钮",
+            response = OutcomerEnter.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestBody OutcomerEnter outcomerEnter) {
+        return service.insert(outcomerEnter);
+    }
+
+    @ApiOperation(value = "修改外来人员登记记录", notes = "只是更新离开时间",
+            response = OutcomerEnter.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.PUT)
+    public SimpleMessage leave(@PathVariable String id) {
+        return service.update(id);
+    }
+    @ApiOperation(value = "单条删除外来人员登记记录", notes = "单条删除",
+            response = OutcomerEnter.class)
+    @RequestMapping(value = "/{id}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String id) {
+        return service.delete(id);
+    }
+
+    @ApiOperation(value = "多条删除外来人员登记记录", notes = "多条删除 ids=id1,id2 无需引号，[]等",
+            response = OutcomerEnter.class)
+    @RequestMapping(value = "/deletes", method = RequestMethod.POST)
+    public SimpleMessage deletes(@RequestParam String[] ids) {
+        return service.deletes(ids);
+    }
+}
+package com.hanboard.outcomerenter.dao;
+
+import com.hanboard.outcomerenter.model.OutcomerEnter;
+import org.apache.ibatis.annotations.Param;
+
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/2/10.
+ */
+public interface OutcomerEnterDao {
+    void insert(OutcomerEnter outcomerEnter);
+
+    void update(@Param("id") String id, @Param("leaveTime") Date leaveTime);
+
+    void delete(@Param("id") String id);
+    void deletes(String[] ids);
+
+    List<OutcomerEnter> query(Map map);
+}
+package com.hanboard.outcomerenter.model;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+
+import java.util.Date;
+
+/**
+ * Created by gaoxiaobo on 2017/2/9.
+ */
+public class OutcomerEnter {
+    private String id;
+    private String name;
+    private String idCard;
+    private String reason;
+    private String schoolName;
+
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss",timezone = "GMT+8")
+    private Date enterTime;
+
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss",timezone = "GMT+8")
+    private Date leaveTime;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getIdCard() {
+        return idCard;
+    }
+
+    public void setIdCard(String idCard) {
+        this.idCard = idCard;
+    }
+
+    public String getReason() {
+        return reason;
+    }
+
+    public void setReason(String reason) {
+        this.reason = reason;
+    }
+
+    public String getSchoolName() {
+        return schoolName;
+    }
+
+    public void setSchoolName(String schoolName) {
+        this.schoolName = schoolName;
+    }
+
+    public Date getEnterTime() {
+        return enterTime;
+    }
+
+    public void setEnterTime(Date enterTime) {
+        this.enterTime = enterTime;
+    }
+
+    public Date getLeaveTime() {
+        return leaveTime;
+    }
+
+    public void setLeaveTime(Date leaveTime) {
+        this.leaveTime = leaveTime;
+    }
+}
+package com.hanboard.outcomerenter.service;
+
+import com.github.orderbyhelper.OrderByHelper;
+import com.github.pagehelper.PageHelper;
+import com.github.pagehelper.PageInfo;
+import com.hanboard.outcomerenter.dao.OutcomerEnterDao;
+import com.hanboard.outcomerenter.model.OutcomerEnter;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.data.page.ParameterUtil;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.Date;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/2/10.
+ */
+@Service
+@Transactional
+@Validated
+public class OutcomerEnterService {
+    @Autowired
+    OutcomerEnterDao dao;
+
+    public Pager query(PagerQuery pagerQuery) {
+        //封装查询条件
+        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+        if (StringUtils.isNotEmpty(orderStr)) {
+            OrderByHelper.orderBy(orderStr);
+        }
+        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+        List<OutcomerEnter> list = dao.query(map);
+        PageInfo pageInfo = new PageInfo(list);
+        Pager pager = new Pager<OutcomerEnter>(pageInfo.getTotal(), pageInfo.getList());
+        return pager;
+    }
+    public SimpleMessage insert(OutcomerEnter outcomerEnter){
+        outcomerEnter.setEnterTime(new Date());
+        dao.insert(outcomerEnter);
+        return SimpleMessage.info("添加外来人员登记记录成功");
+    }
+
+    public SimpleMessage update(String id) {
+        dao.update(id,new Date());
+        return SimpleMessage.info("修改外来人员离校时间成功");
+
+    }
+
+    public SimpleMessage delete(String id) {
+        dao.delete(id);
+        return SimpleMessage.info("删除外来人员登记记录成功");
+    }
+
+    public SimpleMessage deletes(String[] ids) {
+        dao.deletes(ids);
+        return SimpleMessage.info("删除外来人员登记记录成功");
+    }
+}
+package com.hanboard.school.basic.commons.dao;
+
+import org.apache.ibatis.annotations.Param;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/4/12.
+ */
+public interface BasicDao {
+    List<String> getSchoolIdsByAuthority(@Param("userId") String userId);
+}
+package com.hanboard.school.basic.commons.service;
+
+import com.hanboard.school.basic.commons.dao.BasicDao;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/4/12.
+ */
+@Transactional
+@Service
+public class BasicService {
+    @Autowired
+    BasicDao dao;
+    public List<String> getSchoolIdsByAuthority(String userId){
+        return dao.getSchoolIdsByAuthority(userId);
+    }
+}
+package com.hanboard.studententer.controller;
+
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.school.studententer.model.StudentEnter;
+import com.hanboard.studententer.rpcServiceImpl.StudentEnterServiceImpl;
+import com.hanboard.studententer.service.StudentEnterService;
+import io.swagger.annotations.Api;
+import io.swagger.annotations.ApiOperation;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * Created by gaoxiaobo on 2017/2/8.
+ */
+@RestController
+@RequestMapping("/studentEnter")
+@Api(description = "学生出入校管理")
+public class StudentEnterController {
+    @Autowired
+    StudentEnterService service;
+//    @Autowired
+//    StudentEnterServiceImpl rpcService;
+
+    @ApiOperation(value = "学生出入校记录查询", notes = "查询条件不加引号：{filter:enterType=0|1;studentName=xxx;" +
+            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+            "order:enterTime=desc}", response = PagerQuery.class)
+    @RequestMapping(value = "/list", method = RequestMethod.GET)
+    public SimpleMessage query(PagerQuery pagerQuery) {
+        Pager pager = service.query(pagerQuery);
+        return SimpleMessage.info(pager);
+    }
+
+    @ApiOperation(value = "添加学生出入校记录", notes = "enterType [1 进，0 出]", response = StudentEnter.class)
+    @RequestMapping(value = "", method = RequestMethod.POST)
+    public SimpleMessage add(@RequestBody StudentEnter studentEnter) {
+        return service.insert(studentEnter);
+    }
+
+//    @ApiOperation(value = "修改学生出入校记录", notes = "只能改 姓名，学校名称，用于测试单条，实际只应同步或导入", response = StudentEnter.class)
+//    @RequestMapping(value = "/{id}", method = RequestMethod.PUT)
+//    public SimpleMessage update(StudentEnter studentEnter) {
+//        return service.update(studentEnter);
+//    }
+
+    @ApiOperation(value = "删除学生出入校记录", notes = "单条删除")
+    @RequestMapping(value = "/{id}", method = RequestMethod.DELETE)
+    public SimpleMessage delete(@PathVariable String id) {
+        return service.delete(id);
+    }
+
+//    @ApiOperation(value = "学生出入校记录rpc接口", notes = "查询条件不加引号：{filter:enterType=0|1;studentName=xxx;" +
+//            "startTime=2017-02-08 11:46:57;endTime=2017-02-08 12:46:57;" +
+//            "order:enterTime=desc}", response = PagerQuery.class)
+//    @RequestMapping(value = "/rpc/list", method = RequestMethod.GET)
+//    public SimpleMessage getStudentEnterByRpc(PagerQuery pagerQuery) {
+//        Pager pager = rpcService.getStudentEnterByRpc(pagerQuery);
+//        return SimpleMessage.info(pager);
+//    }
+
+}
+package com.hanboard.studententer.dao;
+
+import com.hanboard.school.studententer.model.StudentEnter;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Created by gaoxiaobo on 2017/2/8.
+ */
+public interface StudentEnterDao {
+    void insert(StudentEnter studentEnter);
+
+    void update(StudentEnter studentEnter);
+
+    List<StudentEnter> query(Map map);
+
+    void delete(String id);
+}
+package com.hanboard.studententer.rpcServiceImpl;
+
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.school.studententer.service.StudentEnterServiceDefine;
+import com.hanboard.studententer.service.StudentEnterService;
+import org.springframework.beans.factory.annotation.Autowired;
+
+/**
+ * Created by gaoxiaobo on 2017/3/14.
+ */
+public class StudentEnterServiceImpl implements StudentEnterServiceDefine {
+    @Autowired
+    StudentEnterService studentEnterService;
+
+    @Override
+    public Pager getStudentEnterByRpc(PagerQuery pagerQuery) {
+
+        return studentEnterService.query(pagerQuery);
+    }
+}
+package com.hanboard.studententer.service;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+/**
+ * Created by gaoxiaobo on 2017/3/27.
+ */
+@Component
+public class BasicConfig {
+
+    private static String url;
+
+    @Value("${client.url}")
+    private void setUrl(String value) {
+        BasicConfig.url = value;
+    }
+
+    public static String getUrl(){
+        return  url;
+    }
+}
+package com.hanboard.studententer.service;
+
+import com.hanboard.archives.rpc.service.PassagewayService;
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+import com.hanboard.platform.framework.utils.rpc.RpcUtil;
+import com.hanboard.school.studententer.model.StudentEnter;
+import com.hanboard.studententer.dao.StudentEnterDao;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.Date;
+
+/**
+ * Created by gaoxiaobo on 2017/2/8.
+ */
+@Service
+@Validated()
+@Transactional
+public class StudentEnterService {
+    @Autowired
+    StudentEnterDao dao;
+
+    public Pager query(PagerQuery pagerQuery) {
+        //封装查询条件
+//        Map map = ParameterUtil.stringToMap(pagerQuery.getFilter());
+//        String orderStr = ParameterUtil.StringToOrder(pagerQuery.getOrder());
+//        if (StringUtils.isNotEmpty(orderStr)) {
+//            OrderByHelper.orderBy(orderStr);
+//        }
+//        PageHelper.startPage(pagerQuery.getStart(), pagerQuery.getLength());
+//        List<StudentEnter> list = dao.query(map);
+//        PageInfo pageInfo = new PageInfo(list);
+//        Pager pager = new Pager<StudentEnter>(pageInfo.getTotal(), pageInfo.getList());
+//        return pager;
+
+        PassagewayService ps = RpcUtil.getRpcService("passage_wayService");
+        return ps.originalRecords(pagerQuery);
+    }
+
+    public SimpleMessage insert(StudentEnter studentEnter) {
+        studentEnter.setEnterTime(new Date());
+        dao.insert(studentEnter);
+        return SimpleMessage.info("添加学生出入校记录成功");
+    }
+
+    public SimpleMessage update(StudentEnter studentEnter) {
+        dao.update(studentEnter);
+        return SimpleMessage.info("修改学生出入校记录成功");
+    }
+
+    public SimpleMessage delete(String id) {
+        dao.delete(id);
+        return SimpleMessage.info("删除学生出入校记录成功");
+    }
+
+    public String getConfig() {
+        String url = BasicConfig.getUrl();
+        return url;
+    }
+}
+package com.hanboard.school.enumeration;
+
+import com.hanboard.platform.framework.data.enumeration.ValueEnum;
+
+/**
+ * Created by gaoxiaobo on 2017/3/9.
+ */
+public enum  CameraUseStatusEnum implements ValueEnum<String,Integer> {
+    HAVE_USE("已配置",1),
+    NO_USE("未配置",0);
+
+    private Integer value;
+    private String name;
+
+    CameraUseStatusEnum(String name,Integer value) {
+        this.value = value;
+        this.name = name;
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public Integer getValue() {
+        return value;
+    }
+}
+package com.hanboard.school.enumeration;
+
+import com.hanboard.platform.framework.data.enumeration.ValueEnum;
+
+/**
+ * Created by gaoxiaobo on 2017/3/9.
+ */
+public enum EnterTypeEnum implements ValueEnum<String,Integer> {
+    ENTER("进入",1),
+    EXIT("离开",0);
+
+    private Integer value;
+    private String name;
+
+    EnterTypeEnum(String name, Integer value) {
+        this.value = value;
+        this.name = name;
+    }
+
+    @Override
+    public String getName() {
+        return name;
+    }
+
+    @Override
+    public Integer getValue() {
+        return value;
+    }
+}
+package com.hanboard.school.monitor.model;
+
+import com.hanboard.school.enumeration.CameraUseStatusEnum;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public class Camera {
+    private String id;
+    private String alias;
+    private String channelCode;
+    private Integer useStatus;
+    private String useStatusName;
+
+    private String recorderAlias;
+    private String recorderId;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getAlias() {
+        return alias;
+    }
+
+    public void setAlias(String alias) {
+        this.alias = alias;
+    }
+
+    public String getChannelCode() {
+        return channelCode;
+    }
+
+    public void setChannelCode(String channelCode) {
+        this.channelCode = channelCode;
+    }
+
+
+    public String getRecorderId() {
+        return recorderId;
+    }
+
+    public void setRecorderId(String recorderId) {
+        this.recorderId = recorderId;
+    }
+
+    public Integer getUseStatus() {
+        return useStatus;
+    }
+
+    public void setUseStatus(Integer useStatus) {
+        this.useStatus = useStatus;
+    }
+
+    public String getUseStatusName() {
+        switch (useStatus){
+            case 1:
+                useStatusName = CameraUseStatusEnum.HAVE_USE.getName();
+                break;
+            case 0:
+                useStatusName = CameraUseStatusEnum.NO_USE.getName();
+                break;
+        }
+        return useStatusName;
+    }
+
+
+
+
+    public String getRecorderAlias() {
+        return recorderAlias;
+    }
+
+    public void setRecorderAlias(String recorderAlias) {
+        this.recorderAlias = recorderAlias;
+    }
+}
+package com.hanboard.school.monitor.model;
+
+import java.io.Serializable;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public class CameraPlayParam implements Serializable {
+    private String id;
+    private String schoolId;
+    private String schoolName;
+    private String recorderAlias;
+
+    private String cameraId;
+    private String cameraAlias;
+    private String ip;
+    private String port;
+    private String username;
+    private String password;
+    private String channelCode;
+
+    private String className;
+    private String classCode;
+
+    private String mobilePort;
+
+    public String getCameraId() {
+        return cameraId;
+    }
+
+    public void setCameraId(String cameraId) {
+        this.cameraId = cameraId;
+    }
+
+    public String getClassName() {
+        return className;
+    }
+
+    public void setClassName(String className) {
+        this.className = className;
+    }
+
+    public String getClassCode() {
+        return classCode;
+    }
+
+    public void setClassCode(String classCode) {
+        this.classCode = classCode;
+    }
+
+    public String getMobilePort() {
+        return mobilePort;
+    }
+
+    public void setMobilePort(String mobilePort) {
+        this.mobilePort = mobilePort;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getSchoolId() {
+        return schoolId;
+    }
+
+    public void setSchoolId(String schoolId) {
+        this.schoolId = schoolId;
+    }
+
+    public String getSchoolName() {
+        return schoolName;
+    }
+
+    public void setSchoolName(String schoolName) {
+        this.schoolName = schoolName;
+    }
+
+    public String getRecorderAlias() {
+        return recorderAlias;
+    }
+
+    public void setRecorderAlias(String recorderAlias) {
+        this.recorderAlias = recorderAlias;
+    }
+
+    public String getCameraAlias() {
+        return cameraAlias;
+    }
+
+    public void setCameraAlias(String cameraAlias) {
+        this.cameraAlias = cameraAlias;
+    }
+
+    public String getIp() {
+        return ip;
+    }
+
+    public void setIp(String ip) {
+        this.ip = ip;
+    }
+
+    public String getPort() {
+        return port;
+    }
+
+    public void setPort(String port) {
+        this.port = port;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+
+    public String getChannelCode() {
+        return channelCode;
+    }
+
+    public void setChannelCode(String channelCode) {
+        this.channelCode = channelCode;
+    }
+}
+package com.hanboard.school.monitor.model;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public class Classroom {
+    private String id;
+    private String schoolName;
+    private String stageId;
+    private String stageName;
+
+    private String name;
+    private String code;
+
+
+    private Integer gradeNum;
+    private Integer classNum;
+
+    //只是为了展示用，未来还要有 图片url
+    private String cameraAlias;
+    //播放时用
+    private String cameraId;
+    //摄像头和教室关联表id
+    private String ccId;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getStageId() {
+        return stageId;
+    }
+
+    public void setStageId(String stageId) {
+        this.stageId = stageId;
+    }
+
+    public String getStageName() {
+        return stageName;
+    }
+
+    public void setStageName(String stageName) {
+        this.stageName = stageName;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getCode() {
+        return code;
+    }
+
+    public void setCode(String code) {
+        this.code = code;
+    }
+
+    public Integer getGradeNum() {
+        return gradeNum;
+    }
+
+    public void setGradeNum(Integer gradeNum) {
+        this.gradeNum = gradeNum;
+    }
+
+    public Integer getClassNum() {
+        return classNum;
+    }
+
+    public void setClassNum(Integer classNum) {
+        this.classNum = classNum;
+    }
+
+    public String getSchoolName() {
+        return schoolName;
+    }
+
+    public void setSchoolName(String schoolName) {
+        this.schoolName = schoolName;
+    }
+
+    public String getCameraAlias() {
+        return cameraAlias;
+    }
+
+    public void setCameraAlias(String cameraAlias) {
+        this.cameraAlias = cameraAlias;
+    }
+
+    public String getCcId() {
+        return ccId;
+    }
+
+    public void setCcId(String ccId) {
+        this.ccId = ccId;
+    }
+
+    public String getCameraId() {
+        return cameraId;
+    }
+
+    public void setCameraId(String cameraId) {
+        this.cameraId = cameraId;
+    }
+
+    public Classroom(){
+
+    }
+    public Classroom(String id, String stageId, String name,
+                     String code, Integer gradeNum, Integer classNum) {
+        this.id = id;
+        this.stageId = stageId;
+        this.name = name;
+        this.code = code;
+        this.gradeNum = gradeNum;
+        this.classNum = classNum;
+    }
+
+}
+package com.hanboard.school.monitor.model;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public class Recorder {
+    private String id;
+    private String schoolId;
+    private String schoolName;
+    private String alias;
+    private String ip;
+    private String port;
+    private String username;
+    private String password;
+
+    private String mobilePort;
+
+    public String getMobilePort() {
+        return mobilePort;
+    }
+
+    public void setMobilePort(String mobilePort) {
+        this.mobilePort = mobilePort;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getSchoolId() {
+        return schoolId;
+    }
+
+    public void setSchoolId(String schoolId) {
+        this.schoolId = schoolId;
+    }
+
+    public String getSchoolName() {
+        return schoolName;
+    }
+
+    public void setSchoolName(String schoolName) {
+        this.schoolName = schoolName;
+    }
+
+    public String getAlias() {
+        return alias;
+    }
+
+    public void setAlias(String alias) {
+        this.alias = alias;
+    }
+
+    public String getIp() {
+        return ip;
+    }
+
+    public void setIp(String ip) {
+        this.ip = ip;
+    }
+
+    public String getPort() {
+        return port;
+    }
+
+    public void setPort(String port) {
+        this.port = port;
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public void setUsername(String username) {
+        this.username = username;
+    }
+
+    public String getPassword() {
+        return password;
+    }
+
+    public void setPassword(String password) {
+        this.password = password;
+    }
+}
+package com.hanboard.school.monitor.model;
+
+/**
+ * Created by gaoxiaobo on 2017/3/2.
+ */
+public class Stage {
+    private String id;
+    private String schoolId;
+    private String schoolName;
+
+    private String stageName;
+    private Integer maxGrade;
+    private Integer maxClass;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getSchoolId() {
+        return schoolId;
+    }
+
+    public void setSchoolId(String schoolId) {
+        this.schoolId = schoolId;
+    }
+
+    public String getSchoolName() {
+        return schoolName;
+    }
+
+    public void setSchoolName(String schoolName) {
+        this.schoolName = schoolName;
+    }
+
+    public String getStageName() {
+        return stageName;
+    }
+
+    public void setStageName(String stageName) {
+        this.stageName = stageName;
+    }
+
+    public Integer getMaxGrade() {
+        return maxGrade;
+    }
+
+    public void setMaxGrade(Integer maxGrade) {
+        this.maxGrade = maxGrade;
+    }
+
+    public Integer getMaxClass() {
+        return maxClass;
+    }
+
+    public void setMaxClass(Integer maxClass) {
+        this.maxClass = maxClass;
+    }
+}
+package com.hanboard.school.monitor.service;
+
+import com.hanboard.school.monitor.model.CameraPlayParam;
+
+import java.util.List;
+
+/**
+ * Created by gaoxiaobo on 2017/3/12.
+ */
+public interface MonitorServiceDefine {
+    List<CameraPlayParam> getByRpc(String schoolId, String[] classCode);
+}
+package com.hanboard.school.notice.model;
+
+/**
+ * Created by Mike on 2017/2/21.
+ */
+public enum AuditEnum {
+    NO((short)0,"不审核"),
+    WAIT((short)1,"未审核"),
+    PASS((short)2,"审核通过"),
+    FAIL((short)3,"审核不通过");
+
+    private final Short value;
+    private final String description;
+
+    private AuditEnum(Short v, String desc) {
+        this.value = v;
+        this.description = desc;
+    }
+
+    public Short getValue() {
+        return value;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public static AuditEnum get(Short strValue) {
+        for (AuditEnum e : values()) {
+            if (e.getValue() == strValue) {
+                return e;
+            }
+        }
+        return null;
+    }
+}
+package com.hanboard.school.notice.model;
+
+import java.util.List;
+
+/**
+ * Created by Mike on 2017/2/16.
+ */
+public class Notice {
+    private NoticeManagerment noticeManagerment;
+    private List<NoticeUser> noticeUsers;
+    private List<NoticeOrganization> noticeOrganizations;
+    private List<NoticeFile> noticeFiles;
+
+    public NoticeManagerment getNoticeManagerment() {
+        return noticeManagerment;
+    }
+
+    public void setNoticeManagerment(NoticeManagerment noticeManagerment) {
+        this.noticeManagerment = noticeManagerment;
+    }
+
+    public List<NoticeUser> getNoticeUsers() {
+        return noticeUsers;
+    }
+
+    public void setNoticeUsers(List<NoticeUser> noticeUsers) {
+        this.noticeUsers = noticeUsers;
+    }
+
+    public List<NoticeOrganization> getNoticeOrganizations() {
+        return noticeOrganizations;
+    }
+
+    public void setNoticeOrganizations(List<NoticeOrganization> noticeOrganizations) {
+        this.noticeOrganizations = noticeOrganizations;
+    }
+
+    public List<NoticeFile> getNoticeFiles() {
+        return noticeFiles;
+    }
+
+    public void setNoticeFiles(List<NoticeFile> noticeFiles) {
+        this.noticeFiles = noticeFiles;
+    }
+}
+package com.hanboard.school.notice.model;
+
+import java.util.Date;
+
+public class NoticeFile {
+    private String id;
+
+    private String noticeId;
+
+    private String fileId;
+
+    private Date createTime;
+
+    private Date updateTime;
+
+    private String fileName;
+
+    private String fileSize;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id == null ? null : id.trim();
+    }
+
+    public String getNoticeId() {
+        return noticeId;
+    }
+
+    public void setNoticeId(String noticeId) {
+        this.noticeId = noticeId == null ? null : noticeId.trim();
+    }
+
+    public String getFileId() {
+        return fileId;
+    }
+
+    public void setFileId(String fileId) {
+        this.fileId = fileId == null ? null : fileId.trim();
+    }
+
+    public Date getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(Date createTime) {
+        this.createTime = createTime;
+    }
+
+    public Date getUpdateTime() {
+        return updateTime;
+    }
+
+    public void setUpdateTime(Date updateTime) {
+        this.updateTime = updateTime;
+    }
+
+    public String getFileName() {
+        return fileName;
+    }
+
+    public void setFileName(String fileName) {
+        this.fileName = fileName == null ? null : fileName.trim();
+    }
+
+    public String getFileSize() {
+        return fileSize;
+    }
+
+    public void setFileSize(String fileSize) {
+        this.fileSize = fileSize == null ? null : fileSize.trim();
+    }
+}
+package com.hanboard.school.notice.model;
+
+import java.util.Date;
+
+public class NoticeManagerment {
+    private String id;
+
+    private String noticeContent;
+
+    private String auditId;
+
+    private String auditor;
+
+    private Short auditStatus;
+
+    private String noticeTitle;
+
+    private Date messageTime;
+
+    private String flowId;
+
+    private String schoolId;
+
+    private String campusId;
+
+    private String creator;
+
+    private Short messageType;
+
+    private Short isOutside;
+
+    private Short sendRange;
+
+    private String rejectReason;
+
+    private Date createTime;
+
+    private Date updateTime;
+
+    private Short isAudit;
+
+    private String createId;
+
+    private String readInfo;
+
+    private Short isRead;
+
+    public Short getIsRead() {
+        return isRead;
+    }
+
+    public void setIsRead(Short isRead) {
+        this.isRead = isRead;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getNoticeContent() {
+        return noticeContent;
+    }
+
+    public void setNoticeContent(String noticeContent) {
+        this.noticeContent = noticeContent;
+    }
+
+    public String getAuditId() {
+        return auditId;
+    }
+
+    public void setAuditId(String auditId) {
+        this.auditId = auditId;
+    }
+
+    public String getAuditor() {
+        return auditor;
+    }
+
+    public void setAuditor(String auditor) {
+        this.auditor = auditor;
+    }
+
+    public Short getAuditStatus() {
+        return auditStatus;
+    }
+
+    public void setAuditStatus(Short auditStatus) {
+        this.auditStatus = auditStatus;
+    }
+
+    public String getNoticeTitle() {
+        return noticeTitle;
+    }
+
+    public void setNoticeTitle(String noticeTitle) {
+        this.noticeTitle = noticeTitle;
+    }
+
+    public Date getMessageTime() {
+        return messageTime;
+    }
+
+    public void setMessageTime(Date messageTime) {
+        this.messageTime = messageTime;
+    }
+
+    public String getFlowId() {
+        return flowId;
+    }
+
+    public void setFlowId(String flowId) {
+        this.flowId = flowId;
+    }
+
+    public String getSchoolId() {
+        return schoolId;
+    }
+
+    public void setSchoolId(String schoolId) {
+        this.schoolId = schoolId;
+    }
+
+    public String getCampusId() {
+        return campusId;
+    }
+
+    public void setCampusId(String campusId) {
+        this.campusId = campusId;
+    }
+
+    public String getCreator() {
+        return creator;
+    }
+
+    public void setCreator(String creator) {
+        this.creator = creator;
+    }
+
+    public Short getMessageType() {
+        return messageType;
+    }
+
+    public void setMessageType(Short messageType) {
+        this.messageType = messageType;
+    }
+
+    public Short getIsOutside() {
+        return isOutside;
+    }
+
+    public void setIsOutside(Short isOutside) {
+        this.isOutside = isOutside;
+    }
+
+    public Short getSendRange() {
+        return sendRange;
+    }
+
+    public void setSendRange(Short sendRange) {
+        this.sendRange = sendRange;
+    }
+
+    public String getRejectReason() {
+        return rejectReason;
+    }
+
+    public void setRejectReason(String rejectReason) {
+        this.rejectReason = rejectReason;
+    }
+
+    public Date getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(Date createTime) {
+        this.createTime = createTime;
+    }
+
+    public Date getUpdateTime() {
+        return updateTime;
+    }
+
+    public void setUpdateTime(Date updateTime) {
+        this.updateTime = updateTime;
+    }
+
+    public Short getIsAudit() {
+        return isAudit;
+    }
+
+    public void setIsAudit(Short isAudit) {
+        this.isAudit = isAudit;
+    }
+
+    public String getCreateId() {
+        return createId;
+    }
+
+    public void setCreateId(String createId) {
+        this.createId = createId;
+    }
+
+    public String getReadInfo() {
+        return readInfo;
+    }
+
+    public void setReadInfo(String readInfo) {
+        this.readInfo = readInfo;
+    }
+}
+package com.hanboard.school.notice.model;
+
+import java.util.Date;
+
+public class NoticeOrganization {
+    private String id;
+
+    private String noticeId;
+
+    private String orgId;
+
+    private Date createTime;
+
+    private Date updateTime;
+
+    private String orgName;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id == null ? null : id.trim();
+    }
+
+    public String getNoticeId() {
+        return noticeId;
+    }
+
+    public void setNoticeId(String noticeId) {
+        this.noticeId = noticeId == null ? null : noticeId.trim();
+    }
+
+    public String getOrgId() {
+        return orgId;
+    }
+
+    public void setOrgId(String orgId) {
+        this.orgId = orgId == null ? null : orgId.trim();
+    }
+
+    public Date getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(Date createTime) {
+        this.createTime = createTime;
+    }
+
+    public Date getUpdateTime() {
+        return updateTime;
+    }
+
+    public void setUpdateTime(Date updateTime) {
+        this.updateTime = updateTime;
+    }
+
+    public String getOrgName() {
+        return orgName;
+    }
+
+    public void setOrgName(String orgName) {
+        this.orgName = orgName == null ? null : orgName.trim();
+    }
+}
+package com.hanboard.school.notice.model;
+
+import java.util.Date;
+
+public class NoticeUser {
+    private String id;
+
+    private String noticeId;
+
+    private String userId;
+
+    private Date createTime;
+
+    private Date updateTime;
+
+    private String userName;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id == null ? null : id.trim();
+    }
+
+    public String getNoticeId() {
+        return noticeId;
+    }
+
+    public void setNoticeId(String noticeId) {
+        this.noticeId = noticeId == null ? null : noticeId.trim();
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId == null ? null : userId.trim();
+    }
+
+    public Date getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(Date createTime) {
+        this.createTime = createTime;
+    }
+
+    public Date getUpdateTime() {
+        return updateTime;
+    }
+
+    public void setUpdateTime(Date updateTime) {
+        this.updateTime = updateTime;
+    }
+
+    public String getUserName() {
+        return userName;
+    }
+
+    public void setUserName(String userName) {
+        this.userName = userName == null ? null : userName.trim();
+    }
+}
+package com.hanboard.school.notice.model;
+
+import java.util.Date;
+
+public class NoticeUserRecord {
+    private String id;
+
+    private String noticeId;
+
+    private String userId;
+
+    private Date createTime;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id == null ? null : id.trim();
+    }
+
+    public String getNoticeId() {
+        return noticeId;
+    }
+
+    public void setNoticeId(String noticeId) {
+        this.noticeId = noticeId == null ? null : noticeId.trim();
+    }
+
+    public String getUserId() {
+        return userId;
+    }
+
+    public void setUserId(String userId) {
+        this.userId = userId == null ? null : userId.trim();
+    }
+
+    public Date getCreateTime() {
+        return createTime;
+    }
+
+    public void setCreateTime(Date createTime) {
+        this.createTime = createTime;
+    }
+}
+package com.hanboard.school.notice.model;
+
+/**
+ * Created by Mike on 2017/2/21.
+ */
+public enum SendTypeEnum {
+    ALL((short)0,"全部用户"),
+    USER((short)1,"指定用户"),
+    ORG((short)2,"指定组织机构");
+
+    private final Short value;
+    private final String description;
+
+    private SendTypeEnum(Short v, String desc) {
+        this.value = v;
+        this.description = desc;
+    }
+
+    public Short getValue() {
+        return value;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public static SendTypeEnum get(Short strValue) {
+        for (SendTypeEnum e : values()) {
+            if (e.getValue() == strValue) {
+                return e;
+            }
+        }
+        return null;
+    }
+}
+package com.hanboard.school.notice.model;
+
+/**
+ * Created by Mike on 2017/2/16.
+ */
+public enum YesNoEnum {
+    YES((short)1,"是"),
+    NO((short)0,"否");
+
+    private final Short value;
+    private final String description;
+
+    private YesNoEnum(Short v, String desc) {
+        this.value = v;
+        this.description = desc;
+    }
+
+    public Short getValue() {
+        return value;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public static YesNoEnum get(Short strValue) {
+        for (YesNoEnum e : values()) {
+            if (e.getValue() == strValue) {
+                return e;
+            }
+        }
+        return null;
+    }
+}
+package com.hanboard.school.notice.service;
+
+import com.hanboard.platform.framework.data.message.SimpleMessage;
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+
+/**
+ * Created by Mike on 2017/4/5.
+ */
+public interface NoticeServiceDefine {
+    SimpleMessage queryNotice(PagerQuery pagerQuery);
+}
+package com.hanboard.school.studententer.model;
+
+import com.fasterxml.jackson.annotation.JsonFormat;
+import com.hanboard.school.enumeration.EnterTypeEnum;
+
+import java.io.Serializable;
+import java.util.Date;
+
+/**
+ * Created by gaoxiaobo on 2017/2/8.
+ */
+public class StudentEnter implements Serializable{
+    private String id;
+    private String studentCode;
+    private String studentName;
+    private String classCode;
+    private String parentTel;
+    private Integer enterType;
+    //页面展示用
+    private String enterTypeName;
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss", timezone = "GMT+8")
+    private Date enterTime;
+    private String schoolName;
+
+    public String getId() {
+        return id;
+    }
+
+    public void setId(String id) {
+        this.id = id;
+    }
+
+    public String getStudentCode() {
+        return studentCode;
+    }
+
+    public void setStudentCode(String studentCode) {
+        this.studentCode = studentCode;
+    }
+
+    public String getClassCode() {
+        return classCode;
+    }
+
+    public void setClassCode(String classCode) {
+        this.classCode = classCode;
+    }
+
+    public String getParentTel() {
+        return parentTel;
+    }
+
+    public void setParentTel(String parentTel) {
+        this.parentTel = parentTel;
+    }
+
+    public String getStudentName() {
+        return studentName;
+    }
+
+    public void setStudentName(String studentName) {
+        this.studentName = studentName;
+    }
+
+    public Integer getEnterType() {
+        return enterType;
+    }
+
+    public void setEnterType(Integer enterType) {
+        this.enterType = enterType;
+    }
+
+    public Date getEnterTime() {
+        return enterTime;
+    }
+
+    public void setEnterTime(Date enterTime) {
+        this.enterTime = enterTime;
+    }
+
+    public String getSchoolName() {
+        return schoolName;
+    }
+
+    public void setSchoolName(String schoolName) {
+        this.schoolName = schoolName;
+    }
+
+    public String getEnterTypeName() {
+        this.enterTypeName = enterType == EnterTypeEnum.ENTER.getValue() ? EnterTypeEnum.ENTER.getName() :
+                EnterTypeEnum.EXIT.getName();
+        return enterTypeName;
+    }
+
+
+}
+package com.hanboard.school.studententer.service;
+
+import com.hanboard.platform.framework.data.page.Pager;
+import com.hanboard.platform.framework.data.page.PagerQuery;
+
+/**
+ * Created by gaoxiaobo on 2017/3/12.
+ */
+public interface StudentEnterServiceDefine {
+    Pager getStudentEnterByRpc(PagerQuery pagerQuery);
+}
+package com.hanboard.examwork.controller;
+
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestMapping;
+
+/**
+ * Created by gaoxiaobo on 2017/2/16.
+ */
+@Controller
+@RequestMapping("/examWork")
+public class ReportController {
+    /**
+     * 请求 / 返回 reportClass.jsp 页面
+     *
+     * @return 响应页面： WEB-INF/pages/reportClass.jsp
+     */
+    @RequestMapping(value = {"/reportClassIndex/{id}"})
+    public String reportClass(@PathVariable String id) {
+        return "reportClass";
+    }
+
+    @RequestMapping(value = {"/reportRoomIndex/{id}"})
+    public String reportRoom(@PathVariable String id) {
+        return "reportRoom";
+    }
+
+    @RequestMapping(value = {"/reportTagIndex/{id}"})
+    public String reportTag(@PathVariable String id) {
+        return "reportTag";
+    }
+}
+package com.hanboard.common;
+
+import com.github.springtestdbunit.DbUnitTestExecutionListener;
+import com.github.springtestdbunit.annotation.DbUnitConfiguration;
+import com.github.springtestdbunit.dataset.ReplacementDataSetLoader;
+import com.google.common.collect.Lists;
+import com.wksc.commons.utils.db.UUIDUtils;
+import org.apache.commons.lang3.RandomStringUtils;
+import org.junit.Before;
+import org.junit.runner.RunWith;
+import org.mockito.MockitoAnnotations;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.DefaultResourceLoader;
+import org.springframework.core.io.ResourceLoader;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.ContextConfiguration;
+import org.springframework.test.context.TestExecutionListeners;
+import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.springframework.test.context.support.DependencyInjectionTestExecutionListener;
+import org.springframework.test.context.support.DirtiesContextTestExecutionListener;
+import org.springframework.test.context.transaction.TransactionalTestExecutionListener;
+import org.springframework.test.context.web.WebAppConfiguration;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+
+import javax.sql.DataSource;
+import javax.validation.ConstraintViolation;
+import javax.validation.ConstraintViolationException;
+
+import java.text.DecimalFormat;
+import java.util.Random;
+
+import static org.hamcrest.CoreMatchers.hasItem;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThat;
+
+/**
+ * 单元测试基类 Controller
+ *
+ * @author nibo
+ */
+@RunWith(SpringJUnit4ClassRunner.class)
+@ContextConfiguration({
+        "classpath:spring-test/spring-core.xml",
+        "classpath:spring-test/spring-mvc.xml",
+        "classpath:spring/spring-core-school.xml",
+})
+@WebAppConfiguration
+@TestExecutionListeners({DependencyInjectionTestExecutionListener.class,
+        DirtiesContextTestExecutionListener.class,
+        TransactionalTestExecutionListener.class,
+        DbUnitTestExecutionListener.class})
+@DbUnitConfiguration(dataSetLoader = ReplacementDataSetLoader.class)
+@ActiveProfiles("local")
+public abstract class AbstractControllerTestCaseSupport {
+
+    protected MockMvc mockMvc;
+
+    protected abstract Object[] Controllers();
+
+    private DataSource dataSource;
+    private JdbcTemplate jdbcTemplate;
+    private ResourceLoader resourceLoader = new DefaultResourceLoader();
+
+    @Autowired
+    public void setDataSource(DataSource dataSource) {
+        this.dataSource = dataSource;
+        this.jdbcTemplate = new JdbcTemplate(dataSource);
+    }
+
+    @Before
+    public void setup() {
+        MockitoAnnotations.initMocks(this);
+        if (Controllers() == null || Controllers().length == 0) {
+            return;
+        }
+        mockMvc = MockMvcBuilders.standaloneSetup(Controllers()).build();
+    }
+
+    /**
+     * 通过表名计算出表中的总记录数
+     *
+     * @param tableName 表名
+     * @return int 记录条数
+     */
+    protected int countRowsInTable(String tableName) {
+        return jdbcTemplate.queryForObject("SELECT COUNT(0) FROM " + tableName, Integer.class);
+    }
+
+    /**
+     * 表单数校合法性验证
+     *
+     * @param e        {@link ConstraintViolationException}
+     * @param messages 数据验证不通过的提示消息
+     */
+    protected void unitValidateForm(Exception e, String... messages) {
+        if (e.getCause() instanceof ConstraintViolationException) {
+
+            ConstraintViolationException violationException =
+                    (ConstraintViolationException) e.getCause();
+            assertEquals("表单验证，错误数据条数不一致！",
+                    messages.length, violationException.getConstraintViolations().size());
+            for (ConstraintViolation o : violationException.getConstraintViolations()) {
+                assertThat(Lists.newArrayList(messages), hasItem(o.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * 生成 UUID
+     *
+     * @return uuid 字符串
+     */
+    protected String createUUID() {
+        return UUIDUtils.getUUID();
+    }
+
+    /**
+     * 生成当前时间的毫秒值
+     *
+     * @return 当前时间毫秒
+     */
+    protected long createTimeMillis() {
+        return System.currentTimeMillis();
+    }
+
+    /**
+     * 生成 [min, max] 区间范围的随机整数
+     *
+     * @param min 最小值
+     * @param max 最大值
+     * @return [min, max] 区间的随机整数
+     */
+    protected int randomInt(int min, int max) {
+        Random random = new Random();
+        return random.nextInt(max - min + 1) + min;
+    }
+
+    /**
+     * 生成 (min, max) 区间范围的随机小数<br>
+     *
+     * @param min      最小值，非负整数
+     * @param max      最大值，非负整数
+     * @param accuracy 精度
+     * @return (min, max) 区间的随机小数
+     */
+    protected double randomDouble(int min, int max, int accuracy) {
+        Random random = new Random();
+        double result;
+        if (min == 0) {
+            result = random.nextDouble() * max;
+        } else {
+            result = random.nextDouble() * (max - min) + 1;
+        }
+        if (accuracy > 0) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("#.");
+            for (int i = 0; i < accuracy; i++) {
+                sb.append("0");
+            }
+            return Double.parseDouble(new DecimalFormat(sb.toString()).format(result));
+        }
+        return result;
+    }
+
+    /**
+     * 生成指定个数的随机数字串
+     *
+     * @param count 个数
+     * @return 随机生成的数字串
+     */
+    protected String randomNumeric(final int count) {
+        return RandomStringUtils.randomNumeric(count);
+    }
+
+    /**
+     * 生成指定个数的随机字母串
+     *
+     * @param count 个数
+     * @return 随机生成的字母串
+     */
+    protected String randomAlphabetic(final int count) {
+        return RandomStringUtils.randomAlphabetic(count);
+    }
+
+    /**
+     * 生成指定个数的随机字母数字串
+     *
+     * @param count 个数
+     * @return 随机生成的字母数字串
+     */
+    protected String randomAlphanumeric(final int count) {
+        return RandomStringUtils.randomAlphanumeric(count);
+    }
+
+}
+package com.hanboard.controller;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.springtestdbunit.annotation.DatabaseSetup;
+import com.google.common.collect.Maps;
+import com.hanboard.common.AbstractControllerTestCaseSupport;
+import com.hanboard.studententer.controller.StudentEnterController;
+import com.hanboard.studententer.service.StudentEnterService;
+import org.junit.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.MediaType;
+
+import java.util.Map;
+
+import static org.hamcrest.CoreMatchers.is;
+import static org.junit.Assert.assertEquals;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Created by gaoxiaobo on 2017/3/27.
+ */
+public class StudentEnterControllerTest extends AbstractControllerTestCaseSupport {
+    @Autowired
+    private StudentEnterController controller;
+    @Override
+    protected Object[] Controllers() {
+        return new Object[]{controller};
+    }
+    @Autowired
+    StudentEnterService service;
+    /**
+     * 添加
+     *
+     * @throws Exception
+     */
+    @Test
+    @DatabaseSetup(value = "/dbdata/student-enter-data.xml")
+    public void testAdd() throws Exception {
+        Map<String, Object> json = Maps.newHashMap();
+        ObjectMapper mapper = new ObjectMapper();
+        json.put("id", "t5895eef98c911e582030090f5e1dfdb");
+        json.put("studentCode", "xx");
+        json.put("studentName", "gaomumian");
+        json.put("classCode", "20160104");
+        json.put("parentTel", "2");
+        json.put("enterType", "0");
+        json.put("enterTime", "2017-03-26 09:56:53");
+        json.put("schoolName", "sn");
+        mockMvc.perform(
+                post("/studentEnter")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(mapper.writeValueAsString(json)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code", is(0)))
+                .andExpect(jsonPath("$.message", is("添加学生出入校记录成功")));
+
+    }
+
+    @Test
+    public void testConfig() throws Exception {
+
+        String url = service.getConfig();
+        assertEquals("localhost:8500", url);
+//        mockMvc.
+
+    }
+
+}
