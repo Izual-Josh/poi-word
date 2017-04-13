@@ -119,6 +119,7 @@ node_modules
 catalina.base_IS_UNDEFINED
 spy.log
 npm-debug.log
+*.txt
 
 # python
 *.pyc
